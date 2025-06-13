@@ -1,0 +1,19 @@
+Comandos de Execução para os Terminais (Porta 3000)
+Você precisará de duas janelas de terminal abertas, ambas na sua pasta de projeto C:\Users\vanes\Desktop\meu-bot.
+
+Terminal 1: Para rodar o Bot (com Docker)
+Este comando inicia seu contêiner e conecta a porta 3000 do seu computador a ele.
+
+Bash
+
+docker run -it --rm --env-file .env -p 3000:3000 meu-bot-whatsapp
+O que esperar: A mensagem Bot rodando na porta 3000.
+Ação: Deixe esta janela aberta.
+Terminal 2: Para o Túnel (com Ngrok)
+Este comando cria o túnel público para a porta 3000 do seu computador.
+
+Bash
+
+ngrok http 3000
+O que esperar: A tela do ngrok com um novo endereço https online.
+Ação: Copie o novo URL https para usar no painel da Twilio e deixe esta janela também aberta.
