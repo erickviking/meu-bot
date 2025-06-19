@@ -34,11 +34,49 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ---- Funções auxiliares -----------------------------------------------------
 function extractFirstName(text) {
+  const cleaned = text.trim().toLowerCase();
+  
+  // Patterns comuns para apresentação
+  const patterns = [
+    /(?:aqui (?:é|eh) |sou (?:a |o )?|me chamo |meu nome (?:é|eh) )(.+)/,
+    /(?:é|eh) (?:a |o )?(.+)/,
+    /^(.+)$/  // fallback: primeira palavra se não achou pattern
+  ];
+  
+  for (const pattern of patterns) {
+    const match = cleaned.match(pattern);
+    if (match) {
+      const name = match[1].trim().split(' ')[0];
+      // Capitalizar primeira letra
+      return name.charAt(0).toUpperCase() + name.slice(1);
+    }
+  }
+  
   return text.trim().split(' ')[0];
 }
+
 function containsFirstNameOnly(text) {
-  return text.trim().split(' ').length >= 1;
+  const cleaned = text.trim().toLowerCase();
+  
+  // Patterns que indicam apresentação de nome
+  const namePatterns = [
+    /(?:aqui (?:é|eh) |sou (?:a |o )?|me chamo |meu nome (?:é|eh) )/,
+    /^[a-záàãâéêíóôõúç\s]+$/i  // Apenas letras e espaços
+  ];
+  
+  // Se tem pattern de apresentação, é nome
+  if (namePatterns.some(pattern => pattern.test(cleaned))) {
+    return true;
+  }
+  
+  // Se é muito curto ou tem números/símbolos, provavelmente não é nome
+  if (cleaned.length < 2 || /\d|[!@#$%^&*()_+=\[\]{}|;':",./<>?]/.test(cleaned)) {
+    return false;
+  }
+  
+  return true;
 }
+
 function logUnresolvedQuestion(phone, message, stage) {
   const log = {
     timestamp: new Date().toISOString(),
@@ -46,7 +84,11 @@ function logUnresolvedQuestion(phone, message, stage) {
     stage,
     message,
   };
-  fs.appendFileSync('unresolved_questions.log', JSON.stringify(log) + '\n');
+  try {
+    fs.appendFileSync('unresolved_questions.log', JSON.stringify(log) + '\n');
+  } catch (error) {
+    console.error('Erro ao salvar log:', error);
+  }
 }
 
 // ---- Classificador de intenção ----------------------------------------------
