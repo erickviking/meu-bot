@@ -274,14 +274,40 @@ function getCurrentGreeting() {
   }
 }
 
-// ---- FALLBACK SEM IA (QUANDO OPENAI FALHA) ----------------------------------
-function detectIntentFallback(message, stage, session) {
+// ---- FALLBACK CONTEXTUAL ----------------------------------------------------
+function detectIntentFallbackContextual(message, stage, session) {
   const msg = message.toLowerCase().trim();
   
   // Emergência sempre tem prioridade
   if (isEmergency(msg)) return 'emergencia';
   
-  // Baseado em palavras-chave simples
+  // CONTEXTO: Se já mencionou agendamento antes
+  const wantedScheduling = session.problemContext === 'agendamento_direto' || 
+                          (session.conversationHistory || []).some(h => 
+                            h.includes('agendar') || h.includes('marcar') || h.includes('consulta')
+                          );
+  
+  // Se já quer agendar e pergunta preço = valores
+  if (wantedScheduling && (msg.includes('valor') || msg.includes('preço') || msg.includes('custa') || msg.includes('quanto'))) {
+    return 'valores';
+  }
+  
+  // Detecção de confusão
+  if (msg.includes('o que') || msg.includes('sente o que') || msg === 'que' || msg === 'o quê' || msg === 'o que?') {
+    return 'confusao';
+  }
+  
+  // Exame de rotina
+  if (msg.includes('rotina') || msg.includes('checkup') || msg.includes('preventiv') || msg.includes('check up')) {
+    return 'exame_rotina';
+  }
+  
+  // Procedimentos
+  if (msg.includes('endoscopia') || msg.includes('colonoscopia') || msg.includes('exame') || msg.includes('procedimento')) {
+    return 'procedimento';
+  }
+  
+  // Resto das categorias
   if (msg.includes('agendar') || msg.includes('marcar') || msg.includes('consulta')) return 'agendar';
   if (msg.includes('valor') || msg.includes('preço') || msg.includes('custa') || msg.includes('quanto')) return 'valores';
   if (msg.includes('convênio') || msg.includes('convenio') || msg.includes('plano') || msg.includes('unimed')) return 'convenio';
@@ -295,43 +321,67 @@ function detectIntentFallback(message, stage, session) {
   return 'outra';
 }
 
-// ---- CLASSIFICADOR COM IA + FALLBACK MELHORADO ------------------------------
+// ---- CLASSIFICADOR COM CONTEXTO INTELIGENTE ----------------------------------
 async function detectIntent(message, stage, session, retries = 2) {
   try {
     checkCostLimits();
     
-    // Comprime histórico para economizar tokens
-    const compressedHistory = compressContext(session.conversationHistory || []);
-    
+    // Monta contexto RICO da conversa
     const conversationContext = `
-CONTEXTO:
-- Nome: ${session.firstName || 'N/A'}
-- Estágio: ${stage}
-- Problema: ${session.problemContext || 'N/A'}
+CONTEXTO COMPLETO DA CONVERSA:
+- Nome do paciente: ${session.firstName || 'N/A'}
+- Estágio atual: ${stage}
+- Último problema mencionado: ${session.problemContext || 'Nenhum'}
 - Última intenção: ${session.lastIntent || 'N/A'}
+- Histórico recente: ${(session.conversationHistory || []).slice(-10).join(' | ')}
 
-HISTÓRICO:
-${compressedHistory.slice(-5).join('\n')}
-`.trim();
+SITUAÇÃO ATUAL:
+O paciente ${session.firstName || 'alguém'} está conversando com a secretária do Dr. Quelson (gastroenterologista).
+${session.problemContext ? `Contexto: O paciente mencionou querer ${session.problemContext}.` : ''}
+${stage === 'problema' ? 'A secretária está tentando entender qual o problema de saúde do paciente.' : ''}
+${stage === 'situacao' ? 'A secretária está entendendo o motivo do contato.' : ''}
 
-    const prompt = `Analise a intenção da mensagem:
+IMPORTANTE: Analise a mensagem considerando TODO o contexto acima, não apenas a mensagem isolada.
+`;
 
-${conversationContext}
+    const prompt = `${conversationContext}
 
-CATEGORIAS: emergencia, agendar, valores, sintomas, convenio, horarios, positiva, negativa, condicional, saudacao, outra
+Baseado no CONTEXTO COMPLETO acima, analise a intenção da mensagem atual:
 
-MENSAGEM: "${message}"
+CATEGORIAS:
+- emergencia: situação de emergência médica
+- agendar: quer marcar consulta (incluindo quando já mencionou antes)
+- valores: pergunta sobre preço, valor, quanto custa
+- sintomas: descreve problemas de saúde específicos
+- convenio: pergunta sobre planos de saúde
+- horarios: quer saber horários de funcionamento
+- positiva: concorda, aceita, quer continuar
+- negativa: recusa, não quer
+- condicional: "depende", condições
+- confusao: não entendeu algo, pergunta "o que?"
+- saudacao: cumprimentos
+- exame_rotina: menciona exame preventivo, checkup
+- procedimento: pergunta sobre procedimentos específicos
+- outra: outras respostas
 
-Responda SÓ a categoria:`;
+MENSAGEM ATUAL: "${message}"
+
+INSTRUÇÕES:
+1. Considere o CONTEXTO COMPLETO, não apenas a mensagem isolada
+2. Se o paciente já disse que quer agendar antes, perguntas sobre preço são categoria "valores"
+3. Se pergunta "o que?" ou similar, é provavelmente "confusao"
+4. Se menciona exame de rotina ou preventivo, é "exame_rotina"
+
+Responda APENAS com a categoria mais apropriada:`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 10, // Reduzido para economia
-      temperature: 0,
+      max_tokens: 15,
+      temperature: 0.1, // Mais determinístico
     });
 
-    const tokens = response.usage?.total_tokens || 10;
+    const tokens = response.usage?.total_tokens || 15;
     dailyTokenCount += tokens;
     hourlyTokenCount += tokens;
     dailyRequestCount++;
@@ -340,10 +390,10 @@ Responda SÓ a categoria:`;
     const result = response.choices[0].message.content.trim().toLowerCase();
     
     // Valida resultado
-    const validCategories = ['emergencia', 'agendar', 'valores', 'sintomas', 'convenio', 'horarios', 'positiva', 'negativa', 'condicional', 'saudacao', 'outra'];
+    const validCategories = ['emergencia', 'agendar', 'valores', 'sintomas', 'convenio', 'horarios', 'positiva', 'negativa', 'condicional', 'saudacao', 'confusao', 'exame_rotina', 'procedimento', 'outra'];
     if (!validCategories.includes(result)) {
       console.warn(`⚠️ IA retornou categoria inválida: ${result}, usando fallback`);
-      return detectIntentFallback(message, stage, session);
+      return detectIntentFallbackContextual(message, stage, session);
     }
     
     return result;
@@ -352,13 +402,11 @@ Responda SÓ a categoria:`;
     console.error(`⚠️ OpenAI falhou (tentativa ${3-retries}):`, error.message);
     
     if (retries > 0) {
-      // Wait and retry
       await new Promise(resolve => setTimeout(resolve, 1000));
       return detectIntent(message, stage, session, retries - 1);
     }
     
-    // Final fallback
-    return detectIntentFallback(message, stage, session);
+    return detectIntentFallbackContextual(message, stage, session);
   }
 }
 
@@ -457,7 +505,8 @@ async function generateReply(session, from, message) {
           session.stage = 'problema';
           session.problemContext = 'agendamento_direto';
           reply = `Entendo, ${session.firstName}. Para eu conseguir o melhor horário e preparar o Dr. Quelson para te atender bem, pode me contar o que está te incomodando? 🙏`;
-        } else if (intent === 'convenio') {
+        } 
+        else { else if (intent === 'convenio') {
           reply = `${session.firstName}, aqui o Dr. Quelson atende particular, mas posso te dizer uma coisa? Muita gente que vem aqui já passou por vários médicos do convênio... e depois fala que valeu cada centavo investir numa consulta onde realmente se sentiram ouvidas. 
 
 A consulta é R$ 400,00. Pode me contar qual o motivo que te trouxe aqui? Assim posso te explicar se é o tipo de caso que o Dr. Quelson pode te ajudar 😊`;
@@ -477,14 +526,40 @@ A consulta é R$ 400,00. Pode me contar qual o motivo que te trouxe aqui? Assim 
         } else if (intent === 'urgencia') {
           session.stage = 'problema';
           reply = `${session.firstName}, entendo sua urgência. Para eu conseguir o melhor horário para você, pode me contar rapidinho o que está acontecendo?`;
-        } else {
+        // NOVO: Trata exame de rotina
+        else if (intent === 'exame_rotina') {
+          session.stage = 'fechamento';
+          session.problemContext = 'exame_rotina';
+          reply = `Perfeito, ${session.firstName}! Exame de rotina é muito importante. O Dr. Quelson vai fazer uma avaliação completa.
+
+A consulta é R$ 400,00 e dura 60 minutos. Ele fará uma anamnese detalhada e, se necessário, solicitará exames complementares.
+
+O Dr. Quelson atende de segunda a sexta, das 8h às 18h, e sábados pela manhã. 
+
+Você gostaria de agendar ainda essa semana? 📅`;
+        }
           reply = `${session.firstName}, pode me contar um pouquinho do que está te incomodando? Como posso te ajudar melhor com isso que você está sentindo? 💬`;
         }
         break;
 
       case 'problema':
         // 🔴 PROBLEMA - Criando consciência da dor
-        if (intent === 'duracao' || intent === 'sintomas') {
+        
+        // NOVO: Se pergunta sobre valores, responde diretamente
+        if (intent === 'valores') {
+          reply = `${session.firstName}, a consulta é R$ 400,00. Mas antes de agendarmos, me ajuda com uma coisa? O que exatamente está te incomodando? Assim posso te explicar direitinho como o Dr. Quelson pode te ajudar 😊`;
+        }
+        // NOVO: Se pergunta sobre convênio, responde diretamente  
+        else if (intent === 'convenio') {
+          reply = `${session.firstName}, aqui o Dr. Quelson atende particular (R$ 400,00). Pode me contar qual o motivo da consulta? Assim posso te orientar melhor.`;
+        }
+        // NOVO: Se pergunta "o que", "sente o que", clarifica
+        else if (intent === 'outra' && (message.toLowerCase().includes('o que') || message.toLowerCase().includes('sente o que'))) {
+          reply = `Desculpe a confusão, ${session.firstName}! Você me disse que quer marcar uma consulta. Pode me contar qual o motivo? Por exemplo: algum desconforto, dor, exame de rotina... Assim o Dr. Quelson pode se preparar melhor para te atender! 😊`;
+          session.stage = 'situacao'; // Volta para situação
+        }
+        // Fluxo normal de problema
+        else if (intent === 'duracao' || intent === 'sintomas') {
           if (!session.duration) {
             session.duration = message;
             const worseningQuestions = [
@@ -511,13 +586,21 @@ A consulta é R$ 400,00. Pode me contar qual o motivo que te trouxe aqui? Assim 
             ];
             reply = getRandomResponse(implicationStarters);
           }
-        } else {
-          const problemQuestions = [
-            `${session.firstName}, me conta: há quanto tempo você sente isso?`,
-            `E isso tem te incomodado mais em qual parte do dia, ${session.firstName}?`,
-            `Nossa, ${session.firstName}... deve ser bem difícil mesmo 😔 Há quanto tempo está assim?`
-          ];
-          reply = getRandomResponse(problemQuestions);
+        } 
+        // Se não tem problema definido ainda
+        else {
+          // Se está repetindo perguntas, muda abordagem
+          if (session.repeatCount > 2) {
+            reply = `${session.firstName}, vou reformular: você quer agendar uma consulta. É para algum problema específico, exame de rotina, ou consulta preventiva? Assim posso te orientar melhor! 😊`;
+            session.stage = 'situacao'; // Volta para situação
+          } else {
+            const problemQuestions = [
+              `${session.firstName}, me conta: o que te trouxe aqui hoje?`,
+              `Qual o motivo da consulta, ${session.firstName}?`,
+              `Pode me falar sobre o que está te preocupando?`
+            ];
+            reply = getRandomResponse(problemQuestions);
+          }
         }
         break;
 
@@ -657,10 +740,17 @@ async function sendMessage(to, message, retries = 3) {
         const errorData = await response.text();
         console.error(`❌ Tentativa ${attempt}/${retries} falhou:`, errorData);
         
-        // Se é erro de token, não tenta novamente
-        if (errorData.includes('OAuthException') || errorData.includes('access token')) {
-          console.error('🚨 ERRO DE TOKEN - Não retentando');
-          throw new Error(`Token inválido: ${errorData}`);
+        // Se é erro de token ou permissão, não tenta novamente
+        if (errorData.includes('OAuthException') || 
+            errorData.includes('access token') || 
+            errorData.includes('does not have permission') ||
+            errorData.includes('code":10')) {
+          console.error('🚨 ERRO DE TOKEN/PERMISSÃO - Verificar configurações Meta');
+          console.error('💡 Soluções:');
+          console.error('   1. Gerar novo token no Meta for Developers');
+          console.error('   2. Verificar permissões whatsapp_business_messaging');
+          console.error('   3. Confirmar Phone Number ID: ' + process.env.WHATSAPP_PHONE_ID);
+          throw new Error(`Token/Permissão inválida: ${errorData}`);
         }
         
         if (attempt === retries) {
@@ -818,8 +908,19 @@ Para emergências, ligue:
       processingTime: Date.now() - startTime
     });
 
-    // Fallback graceful
+    // Fallback graceful melhorado
     try {
+      // Se for erro de token, não tenta enviar fallback
+      if (error.message.includes('Token') || error.message.includes('permiss')) {
+        console.error('💀 Erro de token - não enviando fallback para evitar loop');
+        return res.status(500).json({
+          error: 'WhatsApp token/permission error',
+          message: 'Verificar configurações no Meta for Developers',
+          timestamp: new Date().toISOString(),
+          reference: `ERR-TOKEN-${Date.now()}`
+        });
+      }
+      
       const session = getSession(from);
       const fallbackMessage = `Desculpe, ${session.firstName || 'amigo(a)'}, estou com dificuldades técnicas. 
 
@@ -969,6 +1070,8 @@ app.get('/health', (req, res) => {
     checks: {
       openai: process.env.OPENAI_API_KEY ? 'configured' : 'missing',
       whatsapp: process.env.WHATSAPP_TOKEN ? 'configured' : 'missing',
+      whatsappPhoneId: process.env.WHATSAPP_PHONE_ID ? 'configured' : 'missing',
+      verifyToken: process.env.VERIFY_TOKEN ? 'configured' : 'missing',
       memory: process.memoryUsage().heapUsed < 500 * 1024 * 1024 ? 'ok' : 'high',
       sessions: sessions.size < 1000 ? 'ok' : 'high'
     }
