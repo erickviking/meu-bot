@@ -3,7 +3,10 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const OpenAI = require('openai');
-const fetch = require('node-fetch'); // npm install node-fetch
+
+// Importação correta do fetch para Node.js
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+
 const fs = require('fs');
 
 const app = express();
