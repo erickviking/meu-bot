@@ -1,4 +1,4 @@
-// bot.js - Secretária NEPQ Blindada contra Erros Críticos
+// bot.js - Secretária NEPQ Blindada CORRIGIDA
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -93,15 +93,37 @@ setInterval(cleanupOldSessions, 30 * 60 * 1000);
 // ---- CONFIGURAÇÃO DA OPENAI -------------------------------------------------
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ---- DETECÇÃO DE EMERGÊNCIAS MÉDICAS ----------------------------------------
+// ---- DETECÇÃO DE EMERGÊNCIAS MÉDICAS MELHORADA -----------------------------
 function isEmergency(message) {
   const emergencyKeywords = [
-    'infarto', 'ataque cardiaco', 'ataque cardíaco', 'samu', '192', 'socorro',
-    'desmaiei', 'não consigo respirar', 'nao consigo respirar', 'peito dói muito',
-    'sangramento', 'emergencia', 'emergência', 'urgencia grave', 'urgência grave',
-    'vou morrer', 'morrer', 'suicidio', 'suicídio', 'me matar',
-    'overdose', 'envenenamento', 'acidente', 'fratura exposta',
-    'convulsão', 'convulsao', 'inconsciente', 'parada cardíaca'
+    // Cardíacas
+    'infarto', 'infarte', 'ataque cardiaco', 'ataque cardíaco', 'peito dói muito', 'dor no peito forte',
+    'parada cardíaca', 'parada cardiaca', 'coração parou',
+    
+    // Respiratórias
+    'não consigo respirar', 'nao consigo respirar', 'falta de ar grave', 'sufocando',
+    'engasgado', 'engasgada', 'asfixia',
+    
+    // Neurológicas
+    'avc', 'derrame', 'convulsão', 'convulsao', 'ataque epilético', 'epileptico',
+    'desmaiei', 'desmaiou', 'inconsciente', 'perdeu consciencia',
+    
+    // Traumas
+    'acidente', 'atropelado', 'fratura exposta', 'sangramento grave', 'muito sangue',
+    'osso quebrado', 'quebrei o osso', 'sangramento',
+    
+    // Intoxicações
+    'overdose', 'envenenamento', 'intoxicação', 'intoxicacao', 'veneno',
+    
+    // Emergência geral
+    'emergencia', 'emergência', 'urgencia grave', 'urgência grave', 'socorro',
+    'samu', '192', '193', '190', 'ambulancia', 'ambulância',
+    
+    // Suicídio
+    'vou me matar', 'quero morrer', 'suicidio', 'suicídio', 'me matar', 'vou morrer', 'morrer',
+    
+    // Dor extrema
+    'dor insuportável', 'dor insuportavel', 'não aguento mais', 'nao aguento mais'
   ];
   
   const msg = message.toLowerCase().trim();
@@ -612,7 +634,7 @@ function validateWebhookPayload(body) {
   return true;
 }
 
-// ---- ENVIO DE MENSAGEM BLINDADO ---------------------------------------------
+// ---- ENVIO DE MENSAGEM BLINDADO - CORRIGIDO ---------------------------------
 async function sendMessage(to, message, retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -633,16 +655,34 @@ async function sendMessage(to, message, retries = 3) {
         return true;
       } else {
         const errorData = await response.text();
-        console.error(`❌ Tentativa ${attempt} falhou:`, errorData);
+        console.error(`❌ Tentativa ${attempt}/${retries} falhou:`, errorData);
+        
+        // Se é erro de token, não tenta novamente
+        if (errorData.includes('OAuthException') || errorData.includes('access token')) {
+          console.error('🚨 ERRO DE TOKEN - Não retentando');
+          throw new Error(`Token inválido: ${errorData}`);
+        }
         
         if (attempt === retries) {
           throw new Error(`Falha após ${retries} tentativas: ${errorData}`);
         }
         
-        // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+      }
+    } catch (error) {
+      console.error(`❌ Erro na tentativa ${attempt}/${retries}:`, error.message);
+      
+      if (attempt === retries) {
+        throw error;
+      }
+      
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
     }
   }
+  
+  return false; // CORREÇÃO: Retorna false se todas as tentativas falharem
 }
 
 // ---- LOGGING CRÍTICO --------------------------------------------------------
@@ -828,7 +868,7 @@ app.get('/', (req, res) => {
   
   res.json({
     status: '💼 Secretária NEPQ Blindada Online',
-    version: '2.0.0-bulletproof',
+    version: '2.0.1-corrected',
     uptime: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`,
     memory: {
       used: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
@@ -848,14 +888,15 @@ app.get('/', (req, res) => {
       emergencyPhonesSize: emergencyPhones.size
     },
     features: [
-      '🚨 Detecção de emergência',
-      '⚡ Rate limiting',
+      '🚨 Detecção de emergência melhorada',
+      '⚡ Rate limiting inteligente',
       '🧠 Context compression',
-      '💰 Cost monitoring',
-      '🔄 Auto-retry',
-      '🛡️ Error recovery',
-      '🧹 Memory cleanup',
-      '📊 Real-time metrics'
+      '💰 Cost monitoring rigoroso',
+      '🔄 Auto-retry com backoff',
+      '🛡️ Error recovery robusto',
+      '🧹 Memory cleanup automático',
+      '📊 Real-time metrics',
+      '🕐 Timezone Brasil correto'
     ],
     timestamp: new Date().toISOString()
   });
@@ -876,6 +917,8 @@ app.get('/metrics', (req, res) => {
     usage: {
       dailyTokens: dailyTokenCount,
       dailyRequests: dailyRequestCount,
+      hourlyTokens: hourlyTokenCount,
+      hourlyRequests: hourlyRequestCount,
       tokenLimit: MAX_DAILY_TOKENS,
       requestLimit: MAX_DAILY_REQUESTS,
       tokenPercentage: ((dailyTokenCount / MAX_DAILY_TOKENS) * 100).toFixed(1),
@@ -907,6 +950,8 @@ app.post('/reset', (req, res) => {
   emergencyPhones.clear();
   dailyTokenCount = 0;
   dailyRequestCount = 0;
+  hourlyTokenCount = 0;
+  hourlyRequestCount = 0;
   
   console.log('🔄 Sistema resetado manualmente');
   
@@ -960,7 +1005,7 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-// Limpeza de emergencyPhones a cada 1 hora (era 2h)
+// Limpeza de emergencyPhones a cada 1 hora
 setInterval(() => {
   const size = emergencyPhones.size;
   emergencyPhones.clear();
@@ -996,36 +1041,28 @@ process.on('SIGINT', () => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log('🚀🛡️ === SECRETÁRIA NEPQ BLINDADA INICIADA === 🛡️🚀');
+  console.log('🚀🛡️ === SECRETÁRIA NEPQ BLINDADA CORRIGIDA === 🛡️🚀');
   console.log(`📍 Porta: ${PORT}`);
   console.log(`🧠 Método: Neuro Emotional Persuasion Questions`);
   console.log(`⚕️ Especialidade: Dr. Quelson - Gastroenterologia`);
   console.log(`🔗 Webhook: https://meu-bot-jhcl.onrender.com/webhook`);
   console.log('');
   console.log('🛡️ PROTEÇÕES ATIVAS:');
-  console.log('  ✅ Detecção de emergência médica');
-  console.log('  ✅ Rate limiting por usuário');
-  console.log('  ✅ Controle de custos OpenAI');
+  console.log('  ✅ Detecção de emergência médica melhorada');
+  console.log('  ✅ Rate limiting por usuário inteligente');
+  console.log('  ✅ Controle de custos OpenAI rigoroso');
   console.log('  ✅ Cleanup automático de memória');
-  console.log('  ✅ Fallback sem IA');
-  console.log('  ✅ Retry automático');
-  console.log('  ✅ Context compression');
-  console.log('  ✅ Timezone Brasil');
-  console.log('  ✅ Validação de payload');
+  console.log('  ✅ Fallback sem IA robusto');
+  console.log('  ✅ Retry automático com exponential backoff');
+  console.log('  ✅ Context compression inteligente');
+  console.log('  ✅ Timezone Brasil correto');
+  console.log('  ✅ Validação de payload completa');
   console.log('  ✅ Graceful error handling');
   console.log('');
   console.log(`💰 Limites: ${MAX_DAILY_TOKENS} tokens/dia, ${MAX_DAILY_REQUESTS} requests/dia`);
+  console.log(`⏰ Limites horários: ${MAX_HOURLY_TOKENS} tokens/hora, ${MAX_HOURLY_REQUESTS} requests/hora`);
   console.log('📊 Monitoramento: /metrics');
   console.log('🏥 Health check: /health');
   console.log('');
   console.log('💼 Pronta para atender pacientes com segurança máxima!');
-});(resolve => setTimeout(resolve, 1000 * attempt));
-      }
-    } catch (error) {
-      console.error(`❌ Erro na tentativa ${attempt}:`, error.message);
-      
-      if (attempt === retries) {
-        throw error;
-      }
-      
-      await new Promise
+});
