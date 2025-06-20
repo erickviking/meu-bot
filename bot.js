@@ -1,8 +1,9 @@
-// bot.js - Secretária NEPQ Blindada CORRIGIDA
+// bot.js - Secretária NEPQ com Redis Persistente
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const OpenAI = require('openai');
+const redis = require('redis');
 
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const fs = require('fs');
@@ -17,12 +18,11 @@ let hourlyTokenCount = 0;
 let hourlyRequestCount = 0;
 
 // Limites mais conservadores
-const MAX_DAILY_TOKENS = 50000; // Reduzido de 100k para 50k ($50/dia max)
-const MAX_DAILY_REQUESTS = 2000; // Reduzido de 5k para 2k
-const MAX_HOURLY_TOKENS = 5000; // Novo: limite por hora
-const MAX_HOURLY_REQUESTS = 200; // Novo: limite por hora
+const MAX_DAILY_TOKENS = 50000;
+const MAX_DAILY_REQUESTS = 2000;
+const MAX_HOURLY_TOKENS = 5000;
+const MAX_HOURLY_REQUESTS = 200;
 
-const rateLimiter = new Map();
 const emergencyPhones = new Set();
 
 // Reset diário dos contadores
@@ -39,12 +39,167 @@ setInterval(() => {
   console.log('🔄 Contadores horários resetados');
 }, 60 * 60 * 1000);
 
-// ---- SESSÕES COM GESTÃO DE MEMÓRIA ------------------------------------------
-const sessions = new Map();
+// ---- SESSION MANAGER COM REDIS PERSISTENTE ----------------------------------
+class SessionManager {
+  constructor() {
+    // Conecta ao Redis
+    this.client = redis.createClient({
+      url: process.env.REDIS_URL || 'redis://localhost:6379'
+    });
+    
+    this.client.on('error', (err) => {
+      console.error('❌ Redis error:', err.message);
+      this.fallbackToMemory = true;
+    });
+    
+    this.client.on('connect', () => {
+      console.log('✅ Redis conectado - Sessions persistentes ativas');
+      this.fallbackToMemory = false;
+    });
+    
+    // Fallback para memory se Redis falhar
+    this.memoryCache = new Map();
+    this.memoryRateLimit = new Map();
+    this.fallbackToMemory = false;
+    
+    // Conecta
+    this.client.connect().catch(() => {
+      console.warn('⚠️ Redis indisponível - usando memory fallback');
+      this.fallbackToMemory = true;
+    });
+  }
 
-function getSession(phone) {
-  if (!sessions.has(phone)) {
-    sessions.set(phone, {
+  // Busca session com fallback automático
+  async getSession(phone) {
+    try {
+      if (this.fallbackToMemory) {
+        return this.getSessionFromMemory(phone);
+      }
+
+      // Tenta buscar no Redis primeiro
+      const sessionData = await this.client.get(`session:${phone}`);
+      
+      if (sessionData) {
+        const session = JSON.parse(sessionData);
+        // Atualiza última atividade
+        session.lastActivity = Date.now();
+        await this.saveSession(phone, session);
+        return session;
+      }
+      
+      // Se não existe, cria nova
+      const newSession = this.createNewSession();
+      await this.saveSession(phone, newSession);
+      return newSession;
+      
+    } catch (error) {
+      console.error('⚠️ Redis falhou, usando memory fallback:', error.message);
+      this.fallbackToMemory = true;
+      return this.getSessionFromMemory(phone);
+    }
+  }
+
+  // Salva session com TTL
+  async saveSession(phone, session) {
+    try {
+      if (this.fallbackToMemory) {
+        this.memoryCache.set(phone, session);
+        return;
+      }
+
+      // Salva no Redis com TTL de 2 horas
+      await this.client.setEx(
+        `session:${phone}`, 
+        7200, // 2 horas em segundos
+        JSON.stringify(session)
+      );
+      
+    } catch (error) {
+      console.error('⚠️ Erro ao salvar session, usando memory:', error.message);
+      this.memoryCache.set(phone, session);
+    }
+  }
+
+  // Rate limiting persistente
+  async isRateLimited(phone) {
+    try {
+      if (this.fallbackToMemory) {
+        return this.isRateLimitedMemory(phone);
+      }
+
+      const now = Date.now();
+      const key = `rate:${phone}`;
+      
+      // Busca requests recentes
+      const requests = await this.client.lRange(key, 0, -1);
+      const recentRequests = requests
+        .map(Number)
+        .filter(time => now - time < 60000); // Último minuto
+      
+      // Diferentes limites baseado no histórico do usuário
+      let maxRequests = 10;
+      if (recentRequests.length === 0) maxRequests = 5; // Novos usuários
+      
+      // Busca session para verificar histórico
+      const session = await this.getSession(phone);
+      if (session && session.conversationHistory && session.conversationHistory.length > 20) {
+        maxRequests = 15; // Usuários ativos
+      }
+      
+      if (recentRequests.length >= maxRequests) {
+        return true;
+      }
+      
+      // Adiciona nova request e limpa antigas
+      await this.client.lPush(key, now.toString());
+      await this.client.lTrim(key, 0, maxRequests - 1); // Mantém só as últimas
+      await this.client.expire(key, 60); // Expira em 1 minuto
+      
+      return false;
+      
+    } catch (error) {
+      console.error('⚠️ Rate limiting falhou, usando memory:', error.message);
+      return this.isRateLimitedMemory(phone);
+    }
+  }
+
+  // Fallback para memory
+  getSessionFromMemory(phone) {
+    if (!this.memoryCache.has(phone)) {
+      this.memoryCache.set(phone, this.createNewSession());
+    }
+    
+    const session = this.memoryCache.get(phone);
+    session.lastActivity = Date.now();
+    return session;
+  }
+
+  isRateLimitedMemory(phone) {
+    const now = Date.now();
+    const userRequests = this.memoryRateLimit.get(phone) || [];
+    
+    const recentRequests = userRequests.filter(time => now - time < 60000);
+    
+    let maxRequests = 10;
+    if (recentRequests.length === 0) maxRequests = 5;
+    
+    const session = this.memoryCache.get(phone);
+    if (session && session.conversationHistory && session.conversationHistory.length > 20) {
+      maxRequests = 15;
+    }
+    
+    if (recentRequests.length >= maxRequests) {
+      return true;
+    }
+    
+    recentRequests.push(now);
+    this.memoryRateLimit.set(phone, recentRequests);
+    return false;
+  }
+
+  // Cria nova session padrão
+  createNewSession() {
+    return {
       stage: 'start',
       firstName: null,
       askedName: false,
@@ -59,32 +214,116 @@ function getSession(phone) {
       conversationHistory: [],
       lastActivity: Date.now(),
       requestCount: 0,
-      timezone: 'America/Sao_Paulo' // Padrão Brasil
-    });
+      timezone: 'America/Sao_Paulo',
+      createdAt: Date.now()
+    };
   }
-  
-  // Atualiza última atividade
-  const session = sessions.get(phone);
-  session.lastActivity = Date.now();
+
+  // Limpa sessions antigas
+  async cleanup() {
+    try {
+      if (this.fallbackToMemory) {
+        const TWO_HOURS = 2 * 60 * 60 * 1000;
+        const now = Date.now();
+        let cleaned = 0;
+        
+        for (const [phone, session] of this.memoryCache.entries()) {
+          if (!session.lastActivity || (now - session.lastActivity) > TWO_HOURS) {
+            this.memoryCache.delete(phone);
+            cleaned++;
+          }
+        }
+        
+        if (cleaned > 0) {
+          console.log(`🧹 Memory cleanup: ${cleaned} sessões removidas`);
+        }
+        return;
+      }
+
+      // Redis faz cleanup automático via TTL
+      const keys = await this.client.keys('session:*');
+      let activeCount = 0;
+      
+      for (const key of keys) {
+        const ttl = await this.client.ttl(key);
+        if (ttl > 0) activeCount++;
+      }
+      
+      console.log(`📊 Redis sessions ativas: ${activeCount}`);
+      
+    } catch (error) {
+      console.error('⚠️ Erro no cleanup:', error.message);
+    }
+  }
+
+  // Estatísticas
+  async getStats() {
+    try {
+      if (this.fallbackToMemory) {
+        return {
+          activeSessions: this.memoryCache.size,
+          activeRateLimits: this.memoryRateLimit.size,
+          storage: 'memory',
+          redis: false
+        };
+      }
+
+      const sessionKeys = await this.client.keys('session:*');
+      const rateKeys = await this.client.keys('rate:*');
+      
+      return {
+        activeSessions: sessionKeys.length,
+        activeRateLimits: rateKeys.length,
+        storage: 'redis',
+        redis: true
+      };
+      
+    } catch (error) {
+      return {
+        activeSessions: this.memoryCache.size,
+        activeRateLimits: this.memoryRateLimit.size,
+        storage: 'memory-fallback',
+        redis: false,
+        error: error.message
+      };
+    }
+  }
+
+  // Graceful shutdown
+  async close() {
+    try {
+      if (!this.fallbackToMemory) {
+        await this.client.disconnect();
+        console.log('✅ Redis desconectado gracefully');
+      }
+    } catch (error) {
+      console.error('⚠️ Erro ao desconectar Redis:', error.message);
+    }
+  }
+}
+
+// Inicializa o session manager
+const sessionManager = new SessionManager();
+
+// Substitui função getSession original por versão Redis
+async function getSession(phone) {
+  const session = await sessionManager.getSession(phone);
   return session;
 }
 
-// Cleanup de sessões antigas (previne memory leak)
-function cleanupOldSessions() {
-  const TWO_HOURS = 2 * 60 * 60 * 1000;
-  const now = Date.now();
-  let cleaned = 0;
-  
-  for (const [phone, session] of sessions.entries()) {
-    if (!session.lastActivity || (now - session.lastActivity) > TWO_HOURS) {
-      sessions.delete(phone);
-      cleaned++;
-    }
-  }
-  
-  if (cleaned > 0) {
-    console.log(`🧹 Limpeza: ${cleaned} sessões antigas removidas`);
-  }
+// Substitui função isRateLimited original por versão Redis  
+async function isRateLimited(phone) {
+  return await sessionManager.isRateLimited(phone);
+}
+
+// Função para salvar session após modificações
+async function saveSession(phone, session) {
+  await sessionManager.saveSession(phone, session);
+}
+
+// Cleanup usando session manager
+async function cleanupOldSessions() {
+  await sessionManager.cleanup();
 }
 
 // Executa limpeza a cada 30 minutos
@@ -146,36 +385,8 @@ Para consultas não urgentes, retome contato quando estiver seguro.
 O Dr. Quelson não atende emergências pelo WhatsApp.`;
 }
 
-// ---- RATE LIMITING MELHORADO ------------------------------------------------
-function isRateLimited(phone) {
-  const now = Date.now();
-  const userRequests = rateLimiter.get(phone) || [];
-  
-  // Remove requests older than 1 minute
-  const recentRequests = userRequests.filter(time => now - time < 60000);
-  
-  // Diferentes limites baseado no histórico do usuário
-  let maxRequests = 10; // Padrão: 10 por minuto
-  
-  // Usuários novos: limite menor
-  if (recentRequests.length === 0) {
-    maxRequests = 5;
-  }
-  
-  // Usuários com muitas mensagens: limite maior
-  const session = sessions.get(phone);
-  if (session && session.conversationHistory && session.conversationHistory.length > 20) {
-    maxRequests = 15;
-  }
-  
-  if (recentRequests.length >= maxRequests) {
-    return true;
-  }
-  
-  recentRequests.push(now);
-  rateLimiter.set(phone, recentRequests);
-  return false;
-}
+// ---- RATE LIMITING MELHORADO COM REDIS --------------------------------------
+// Agora usa sessionManager.isRateLimited() que já foi implementado acima
 
 // ---- CONTROLE DE CUSTOS MAIS RIGOROSO ---------------------------------------
 function checkCostLimits() {
@@ -554,7 +765,7 @@ Você gostaria de agendar ainda essa semana? 📅`;
           reply = `${session.firstName}, aqui o Dr. Quelson atende particular (R$ 400,00). Pode me contar qual o motivo da consulta? Assim posso te orientar melhor.`;
         }
         // NOVO: Se pergunta "o que", "sente o que", clarifica
-        else if (intent === 'outra' && (message.toLowerCase().includes('o que') || message.toLowerCase().includes('sente o que'))) {
+        else if (intent === 'confusao' || (intent === 'outra' && (message.toLowerCase().includes('o que') || message.toLowerCase().includes('sente o que')))) {
           reply = `Desculpe a confusão, ${session.firstName}! Você me disse que quer marcar uma consulta. Pode me contar qual o motivo? Por exemplo: algum desconforto, dor, exame de rotina... Assim o Dr. Quelson pode se preparar melhor para te atender! 😊`;
           session.stage = 'situacao'; // Volta para situação
         }
@@ -602,7 +813,6 @@ Você gostaria de agendar ainda essa semana? 📅`;
             reply = getRandomResponse(problemQuestions);
           }
         }
-        break;
 
       case 'implicacao':
         // 🟠 IMPLICAÇÃO - Aumentando a urgência com cuidado
@@ -851,8 +1061,8 @@ Para emergências, ligue:
 
     console.log(`[${new Date().toLocaleTimeString()}] 📞 ${from}: ${text}`);
 
-    // 5. CONTROLE DE SESSÃO
-    const session = getSession(from);
+    // 5. CONTROLE DE SESSÃO COM REDIS
+    const session = await getSession(from);
     session.requestCount = (session.requestCount || 0) + 1;
 
     // Previne spam de um usuário
@@ -884,6 +1094,9 @@ Para emergências, ligue:
 
     // 7. GERAÇÃO DE RESPOSTA PRINCIPAL
     const reply = await generateReply(session, from, text);
+    
+    // IMPORTANTE: Salva session após modificações
+    await saveSession(from, session);
     
     console.log(`[${new Date().toLocaleTimeString()}] 🤖 → ${session.firstName || from}: ${reply.substring(0, 100)}${reply.length > 100 ? '...' : ''}`);
 
@@ -968,15 +1181,16 @@ app.get('/', (req, res) => {
   const memoryUsage = process.memoryUsage();
   
   res.json({
-    status: '💼 Secretária NEPQ Blindada Online',
-    version: '2.0.1-corrected',
+    status: '💼 Secretária NEPQ com Redis Persistente',
+    version: '3.0.0-redis',
+    storage: sessionManager.fallbackToMemory ? 'memory' : 'redis',
     uptime: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`,
     memory: {
       used: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
       total: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`
     },
     metrics: {
-      activeSessions: sessions.size,
+      activeSessions: (await sessionManager.getStats()).activeSessions,
       dailyTokens: dailyTokenCount,
       dailyRequests: dailyRequestCount,
       hourlyTokens: hourlyTokenCount,
@@ -985,35 +1199,34 @@ app.get('/', (req, res) => {
       maxDailyRequests: MAX_DAILY_REQUESTS,
       maxHourlyTokens: MAX_HOURLY_TOKENS,
       maxHourlyRequests: MAX_HOURLY_REQUESTS,
-      rateLimiterSize: rateLimiter.size,
       emergencyPhonesSize: emergencyPhones.size
     },
     features: [
       '🚨 Detecção de emergência melhorada',
-      '⚡ Rate limiting inteligente',
-      '🧠 Context compression',
+      '⚡ Rate limiting com Redis',
+      '🧠 Context compression inteligente',
       '💰 Cost monitoring rigoroso',
       '🔄 Auto-retry com backoff',
       '🛡️ Error recovery robusto',
-      '🧹 Memory cleanup automático',
+      '🧹 Cleanup automático Redis/Memory',
       '📊 Real-time metrics',
-      '🕐 Timezone Brasil correto'
+      '🕐 Timezone Brasil correto',
+      '💾 Sessions persistentes com Redis',
+      '🔄 Fallback graceful para memory'
     ],
     timestamp: new Date().toISOString()
   });
 });
 
 // ---- ROTA DE MÉTRICAS PARA MONITORAMENTO ------------------------------------
-app.get('/metrics', (req, res) => {
+app.get('/metrics', async (req, res) => {
+  const stats = await sessionManager.getStats();
+  
   res.json({
     sessions: {
-      active: sessions.size,
-      list: Array.from(sessions.keys()).map(phone => ({
-        phone: phone.substring(0, 5) + '***',
-        stage: sessions.get(phone)?.stage,
-        messageCount: sessions.get(phone)?.conversationHistory?.length || 0,
-        lastActivity: sessions.get(phone)?.lastActivity
-      }))
+      active: stats.activeSessions,
+      storage: stats.storage,
+      redis: stats.redis
     },
     usage: {
       dailyTokens: dailyTokenCount,
@@ -1026,7 +1239,7 @@ app.get('/metrics', (req, res) => {
       requestPercentage: ((dailyRequestCount / MAX_DAILY_REQUESTS) * 100).toFixed(1)
     },
     rateLimiting: {
-      activeUsers: rateLimiter.size,
+      activeUsers: stats.activeRateLimits || 0,
       emergencyPhones: emergencyPhones.size
     },
     system: {
@@ -1046,13 +1259,28 @@ app.post('/reset', (req, res) => {
   }
   
   // Reset completo do sistema
-  sessions.clear();
-  rateLimiter.clear();
   emergencyPhones.clear();
   dailyTokenCount = 0;
   dailyRequestCount = 0;
   hourlyTokenCount = 0;
   hourlyRequestCount = 0;
+  
+  // Reset Redis sessions se disponível
+  try {
+    if (!sessionManager.fallbackToMemory) {
+      const keys = await sessionManager.client.keys('session:*');
+      if (keys.length > 0) {
+        await sessionManager.client.del(keys);
+        console.log(`🔄 ${keys.length} sessions Redis removidas`);
+      }
+    } else {
+      sessionManager.memoryCache.clear();
+      sessionManager.memoryRateLimit.clear();
+      console.log('🔄 Memory cache limpo');
+    }
+  } catch (error) {
+    console.error('⚠️ Erro no reset Redis:', error.message);
+  }
   
   console.log('🔄 Sistema resetado manualmente');
   
@@ -1084,16 +1312,28 @@ app.get('/health', (req, res) => {
   res.status(allHealthy ? 200 : 503).json(health);
 });
 
-// ---- CLEANUP JOBS MELHORADOS ------------------------------------------------
+// ---- CLEANUP JOBS MELHORADOS COM REDIS -------------------------------------
 // Limpeza de sessões antigas a cada 30 minutos
-setInterval(cleanupOldSessions, 30 * 60 * 1000);
+setInterval(async () => {
+  await cleanupOldSessions();
+}, 30 * 60 * 1000);
 
-// Limpeza de rate limiter a cada 5 minutos (mais agressiva)
+// Limpeza de emergencyPhones a cada 1 hora
 setInterval(() => {
-  const now = Date.now();
-  let cleaned = 0;
-  
-  for (const [phone, requests] of rateLimiter.entries()) {
+  const size = emergencyPhones.size;
+  emergencyPhones.clear();
+  if (size > 0) {
+    console.log(`🧹 Emergency phones: ${size} registros limpos`);
+  }
+}, 60 * 60 * 1000);
+
+// Limpeza de memória forçada a cada 6 horas
+setInterval(() => {
+  if (global.gc) {
+    global.gc();
+    console.log('🧹 Garbage collection manual executada');
+  }
+}, 6 * 60 * 60 * 1000);()) {
     const recentRequests = requests.filter(time => now - time < 60000);
     if (recentRequests.length === 0) {
       rateLimiter.delete(phone);
@@ -1125,47 +1365,63 @@ setInterval(() => {
   }
 }, 6 * 60 * 60 * 1000);
 
-// ---- GRACEFUL SHUTDOWN ------------------------------------------------------
-process.on('SIGTERM', () => {
+// ---- GRACEFUL SHUTDOWN COM REDIS --------------------------------------------
+process.on('SIGTERM', async () => {
   console.log('📴 Recebido SIGTERM, fazendo shutdown graceful...');
   
   // Log final
-  console.log(`📊 Stats finais: ${sessions.size} sessões, ${dailyTokenCount} tokens, ${dailyRequestCount} requests`);
+  const stats = await sessionManager.getStats();
+  console.log(`📊 Stats finais: ${stats.activeSessions} sessões, ${dailyTokenCount} tokens, ${dailyRequestCount} requests`);
+  
+  // Fecha conexão Redis
+  await sessionManager.close();
   
   process.exit(0);
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('📴 Recebido SIGINT, fazendo shutdown graceful...');
+  await sessionManager.close();
   process.exit(0);
 });
 
 // ---- INICIALIZAÇÃO -----------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-  console.log('🚀🛡️ === SECRETÁRIA NEPQ BLINDADA CORRIGIDA === 🛡️🚀');
+app.listen(PORT, async () => {
+  console.log('🚀💾 === SECRETÁRIA NEPQ COM REDIS PERSISTENTE === 💾🚀');
   console.log(`📍 Porta: ${PORT}`);
   console.log(`🧠 Método: Neuro Emotional Persuasion Questions`);
   console.log(`⚕️ Especialidade: Dr. Quelson - Gastroenterologia`);
   console.log(`🔗 Webhook: https://meu-bot-jhcl.onrender.com/webhook`);
   console.log('');
+  
+  // Status do Redis
+  const stats = await sessionManager.getStats();
+  console.log('💾 ARMAZENAMENTO:');
+  console.log(`  📊 Storage: ${stats.storage}`);
+  console.log(`  💾 Redis: ${stats.redis ? 'Conectado' : 'Desconectado'}`);
+  console.log(`  📈 Sessions: ${stats.activeSessions} ativas`);
+  console.log('');
+  
   console.log('🛡️ PROTEÇÕES ATIVAS:');
+  console.log('  ✅ Sessions persistentes com Redis + fallback');
+  console.log('  ✅ Rate limiting distribuído');
   console.log('  ✅ Detecção de emergência médica melhorada');
-  console.log('  ✅ Rate limiting por usuário inteligente');
   console.log('  ✅ Controle de custos OpenAI rigoroso');
-  console.log('  ✅ Cleanup automático de memória');
+  console.log('  ✅ Context compression inteligente');
   console.log('  ✅ Fallback sem IA robusto');
   console.log('  ✅ Retry automático com exponential backoff');
-  console.log('  ✅ Context compression inteligente');
   console.log('  ✅ Timezone Brasil correto');
   console.log('  ✅ Validação de payload completa');
   console.log('  ✅ Graceful error handling');
+  console.log('  ✅ Auto-cleanup Redis/Memory');
   console.log('');
   console.log(`💰 Limites: ${MAX_DAILY_TOKENS} tokens/dia, ${MAX_DAILY_REQUESTS} requests/dia`);
   console.log(`⏰ Limites horários: ${MAX_HOURLY_TOKENS} tokens/hora, ${MAX_HOURLY_REQUESTS} requests/hora`);
   console.log('📊 Monitoramento: /metrics');
   console.log('🏥 Health check: /health');
   console.log('');
-  console.log('💼 Pronta para atender pacientes com segurança máxima!');
+  console.log('💼 Pronta para atender pacientes com persistência total!');
+  console.log('🔄 Conversas sobrevivem a restarts e deploys!');
 });
