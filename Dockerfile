@@ -1,29 +1,43 @@
-# --- Estágio 1: Base e Instalação de Dependências ---
+# Estágio 1: Builder - Onde as dependências são instaladas
+# Usamos uma imagem completa do Node para ter acesso ao npm e outras ferramentas de build.
+FROM node:20-slim AS builder
 
-# Define a imagem base sobre a qual vamos construir. Usamos a mesma que antes.
-FROM node:22-alpine
-
-# Define o diretório de trabalho dentro do contêiner.
-# A partir daqui, todos os comandos serão executados neste diretório.
+# Define o diretório de trabalho dentro do container
 WORKDIR /app
 
-# Copia os arquivos que listam as dependências.
-# O `*` garante que tanto `package.json` quanto `package-lock.json` sejam copiados.
-COPY package*.json ./
+# Copia os arquivos de definição de pacotes primeiro para aproveitar o cache do Docker.
+# O Docker só reinstalará as dependências se estes arquivos mudarem.
+COPY package.json package-lock.json ./
 
-# Executa o comando para instalar as dependências listadas no package.json.
-# Isso é feito em um passo separado para aproveitar o cache do Docker.
-RUN npm install
+# Instala APENAS as dependências de produção. Ignora devDependencies como o nodemon.
+RUN npm install --omit=dev --clean
 
-# --- Estágio 2: Adição do Código e Execução ---
-
-# Agora, copia todo o resto do código do seu projeto para o diretório de trabalho.
+# Copia o resto do código-fonte da aplicação.
 COPY . .
 
-# Informa ao Docker que o contêiner escuta na porta 3000 em tempo de execução.
-# Isso é mais para documentação e interoperabilidade.
-EXPOSE 3000
 
-# O comando que será executado quando o contêiner iniciar.
-# Ele inicia o seu bot.
-CMD ["node", "bot.js"]
+# Estágio 2: Production - A imagem final que será executada
+# Usamos uma imagem "slim" que é menor e mais segura, pois não contém ferramentas de build.
+FROM node:20-slim
+
+# Define o diretório de trabalho (deve ser o mesmo do estágio de build)
+WORKDIR /app
+
+# Define um argumento para a porta, com um valor padrão.
+ARG PORT=3000
+# Expõe a porta para o ambiente externo.
+EXPOSE ${PORT}
+# Define a variável de ambiente PORT dentro do container.
+ENV PORT=${PORT}
+
+# Copia os node_modules e o código-fonte do estágio 'builder'.
+# Isso evita ter que reinstalar tudo e mantém a imagem final limpa.
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app ./
+
+# Por segurança, roda a aplicação com um usuário não-root.
+USER node
+
+# Comando final para iniciar a aplicação.
+# Exatamente como você especificou.
+CMD ["node", "server.js"]
