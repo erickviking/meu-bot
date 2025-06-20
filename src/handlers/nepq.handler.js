@@ -1,66 +1,64 @@
 // src/handlers/nepq.handler.js
 
-const config = require('../config');             // Importa a configuração principal (valores, chaves)
-const responses = require('../config/responses');   // Importa os roteiros de resposta
+const config = require('../config');
+const responses = require('../config/responses');
 const { detectSimpleIntent, extractFirstName } = require('../utils/helpers');
 const { isEmergency, getEmergencyResponse } = require('../utils/emergencyDetector');
 
-// Esta função agora é o "cérebro" da conversa.
 async function handleConversationFlow(session, message) {
     try {
         const intent = detectSimpleIntent(message);
 
-        // Tratamento de interrupções primeiro, usando a configuração
+        // --- LÓGICA DE TRATAMENTO DE INTERRUPÇÕES MELHORADA ---
+        if (isEmergency(message)) {
+            return getEmergencyResponse(session.firstName);
+        }
         if (intent === 'valores' && session.nepqStage !== 'closing') {
             return responses.handleValuesInterrupt(session.firstName, config.clinic.consultationValue);
         }
         if (intent === 'convenio' && session.nepqStage !== 'closing') {
             return responses.handleInsuranceInterrupt(session.firstName);
         }
-        if (isEmergency(message)) {
-            return getEmergencyResponse(session.firstName);
+        // NOVO: Lida com saudações a qualquer momento para quebrar loops
+        if (intent === 'saudacao' && session.nepqStage !== 'situation_start') {
+            return `Olá, ${session.firstName}! Estávamos conversando sobre o seu problema. Se quiser continuar, pode me responder à última pergunta. Se preferir, podemos recomeçar.`;
         }
-
+        
+        // --- MÁQUINA DE ESTADOS NEPQ ROBUSTA ---
         let reply = '';
         const stage = session.nepqStage;
 
-        // Máquina de Estados NEPQ explícita, agora usando o módulo de respostas
         switch (stage) {
             case 'situation_start':
                 session.problemDescription = message;
                 reply = responses.askProblemDuration(session.firstName);
                 session.nepqStage = 'problem_duration';
                 break;
-
+            // ... (outros cases do NEPQ continuam iguais)
             case 'problem_duration':
                 session.problemDuration = message;
                 reply = responses.askProblemWorsening(session.firstName);
                 session.nepqStage = 'problem_worsening';
                 break;
-
             case 'problem_worsening':
                 session.problemWorsening = message;
                 reply = responses.askTriedSolutions(session.firstName);
                 session.nepqStage = 'problem_tried_solutions';
                 break;
-
             case 'problem_tried_solutions':
                 session.triedSolutions = message;
                 reply = responses.askImplicationImpact(session.firstName);
                 session.nepqStage = 'implication_impact';
                 break;
-
             case 'implication_impact':
                 session.problemImpact = message;
                 reply = responses.askSolutionVisualization(session.firstName);
                 session.nepqStage = 'solution_visualization';
                 break;
-
             case 'solution_visualization':
                 reply = responses.closingStatement(session.firstName);
                 session.nepqStage = 'closing';
                 break;
-
             case 'closing':
                 if (intent === 'positiva' || intent === 'agendar') {
                     reply = responses.askSchedulingPreference(session.firstName);
@@ -69,14 +67,21 @@ async function handleConversationFlow(session, message) {
                     reply = responses.gracefulExit(session.firstName);
                 }
                 break;
-
             case 'scheduling':
                 reply = responses.confirmSchedulingPreference(message);
-                // Aqui você pode adicionar lógica para parar a conversa ou aguardar confirmação
                 break;
 
+            // NOVO: Default case mais inteligente
             default:
-                reply = responses.askToRephrase(session.firstName);
+                session.repeatCount = (session.repeatCount || 0) + 1;
+                if (session.repeatCount > 2) {
+                    reply = `Parece que não estamos nos entendendo. Que tal ligar para ${config.clinic.contactPhone}? Assim podemos resolver mais rápido. Se preferir continuar por aqui, me diga o motivo do seu contato.`;
+                    // Opcional: resetar o estágio para um novo começo
+                    session.nepqStage = 'situation_start'; 
+                    session.repeatCount = 0;
+                } else {
+                    reply = responses.askToRephrase(session.firstName);
+                }
                 break;
         }
         return reply;
@@ -88,7 +93,6 @@ async function handleConversationFlow(session, message) {
     }
 }
 
-// Handler para a primeira interação, também usando o módulo de respostas.
 function handleInitialMessage(session, message) {
     if (!session.askedName) {
         session.askedName = true;
