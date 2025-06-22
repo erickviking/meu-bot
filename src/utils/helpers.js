@@ -1,47 +1,57 @@
 // src/utils/helpers.js
 
 /**
- * Extrai de forma inteligente o primeiro nome de um texto.
- * Prioriza frases explícitas como "Meu nome é João" ou "Aqui é João".
- * Se não encontrar, assume que a última palavra de uma frase curta é o nome.
+ * Extrai de forma inteligente o primeiro nome de um texto, usando uma série de heurísticas em ordem de prioridade.
  * @param {string} text - O texto enviado pelo usuário.
- * @returns {string} O primeiro nome extraído ou um valor padrão.
+ * @returns {string} O primeiro nome extraído ou um valor padrão 'Cliente'.
  */
 function extractFirstName(text) {
     if (!text || typeof text !== 'string') return 'Cliente';
 
     const cleanedText = text.trim().toLowerCase();
-
-    // Padrão 1: Busca por frases explícitas. Ex: "meu nome é joão", "aqui é joão", "sou o joão"
-    // Captura a palavra seguinte a essas expressões.
-    const explicitPattern = /(?:meu nome é|aqui é|sou o|sou a|chamo-me|me chamo)\s+([a-záàãâéêíóôõúç]+)/i;
-    const explicitMatch = cleanedText.match(explicitPattern);
-
-    if (explicitMatch && explicitMatch[1]) {
-        const name = explicitMatch[1];
-        return name.charAt(0).toUpperCase() + name.slice(1);
-    }
-
-    // Padrão 2: Se não houver frase explícita, pega a última palavra da frase.
-    // Isso funciona bem para casos como "Boa tarde, é o João" ou "Olá, sou eu, a Maria".
     const words = cleanedText.split(/\s+/);
-    const lastWord = words[words.length - 1].replace(/[^a-záàãâéêíóôõúç]/gi, '');
+    const capitalizedName = (name) => name.charAt(0).toUpperCase() + name.slice(1);
 
-    // Apenas considera a última palavra se ela tiver um tamanho razoável para um nome.
-    if (lastWord.length > 2) {
-        return lastWord.charAt(0).toUpperCase() + lastWord.slice(1);
+    // Prioridade 1: Busca por frases explícitas. Ex: "meu nome é joão", "aqui é joão".
+    const explicitPattern = /(?:meu nome é|me chamo|sou o|sou a|aqui é)\s+([a-záàãâéêíóôõúç]+)/i;
+    const explicitMatch = cleanedText.match(explicitPattern);
+    if (explicitMatch && explicitMatch[1]) {
+        return capitalizedName(explicitMatch[1]);
     }
-    
-    // Padrão 3 (Fallback): Se a frase tiver apenas uma ou duas palavras, assume que a primeira é o nome.
-    // Isso cobre o caso em que o usuário digita apenas "João" ou "João Silva".
-    if (words.length <= 2) {
-        const firstWord = words[0].replace(/[^a-záàãâéêíóôõúç]/gi, '');
-        if (firstWord) {
-             return firstWord.charAt(0).toUpperCase() + firstWord.slice(1);
+
+    // Prioridade 2: Busca pelo padrão "[NOME] aqui". Resolve o seu caso de teste.
+    if (words.length === 2 && words[1] === 'aqui') {
+        return capitalizedName(words[0]);
+    }
+
+    // Prioridade 3: Se o usuário enviar apenas uma palavra, é provável que seja o nome.
+    if (words.length === 1) {
+        const singleWord = words[0].replace(/[^a-záàãâéêíóôõúç]/gi, '');
+        // Valida se a palavra única tem mais de 2 caracteres para não capturar "oi", "ok", etc.
+        if (singleWord.length > 2) {
+            return capitalizedName(singleWord);
         }
     }
-
-    // Se nenhuma das heurísticas funcionar, retorna um padrão seguro.
+    
+    // Prioridade 4 (Fallback): Se a frase tiver duas palavras e não se encaixar nos padrões acima,
+    // assume que a primeira é o nome. Cobre "João Silva".
+    if (words.length === 2) {
+         const firstWord = words[0].replace(/[^a-záàãâéêíóôõúç]/gi, '');
+         if (firstWord) {
+              return capitalizedName(firstWord);
+         }
+    }
+    
+    // Último Recurso: Se for uma frase mais longa, pega a última palavra,
+    // que pode ser uma assinatura como "Atenciosamente, João".
+    if (words.length > 2) {
+        const lastWord = words[words.length - 1].replace(/[^a-záàãâéêíóôõúç]/gi, '');
+        if (lastWord.length > 2) {
+            return capitalizedName(lastWord);
+        }
+    }
+    
+    // Se absolutamente nenhuma heurística funcionar, retorna um padrão seguro.
     return 'Cliente';
 }
 
@@ -50,7 +60,6 @@ function getRandomResponse(responses) {
     return responses[Math.floor(Math.random() * responses.length)];
 }
 
-// O detector de intenção permanece o mesmo.
 function detectSimpleIntent(message) {
     const msg = message.toLowerCase().trim();
     if (msg.includes('valor') || msg.includes('preço') || msg.includes('custa')) return 'valores';
