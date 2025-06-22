@@ -1,4 +1,3 @@
-// src/config/index.js
 require('dotenv').config();
 
 const config = {
@@ -8,7 +7,6 @@ const config = {
         token: process.env.WHATSAPP_TOKEN,
         phoneId: process.env.WHATSAPP_PHONE_ID,
         verifyToken: process.env.VERIFY_TOKEN,
-        appSecret: process.env.WHATSAPP_APP_SECRET // Crítico para segurança
     },
     openai: {
         apiKey: process.env.OPENAI_API_KEY
@@ -19,20 +17,21 @@ const config = {
     }
 };
 
-// Validação de variáveis críticas
+// Validação para garantir que a aplicação não inicie sem as chaves críticas.
 const requiredConfigs = [
     'whatsapp.token',
     'whatsapp.phoneId',
     'whatsapp.verifyToken',
-    'whatsapp.appSecret',
     'openai.apiKey',
     'redisUrl'
 ];
 
-const missingConfigs = requiredConfigs.filter(path => !path.split('.').reduce((acc, part) => acc && acc[part], config));
+const getConfigValue = (path) => path.split('.').reduce((acc, part) => acc && acc[part], config);
+
+const missingConfigs = requiredConfigs.filter(path => !getConfigValue(path));
 
 if (missingConfigs.length > 0) {
-    console.error('❌ ERRO FATAL: Variáveis de ambiente faltando:', missingConfigs.join(', '));
+    console.error('❌ ERRO FATAL: Variáveis de ambiente críticas faltando:', missingConfigs.join(', '));
     process.exit(1);
 }
 
