@@ -6,7 +6,7 @@
  * @returns {string} O primeiro nome extraído ou um valor padrão 'Cliente'.
  */
 function extractFirstName(text) {
-    if (!text || typeof text !== 'string') return 'Cliente';
+    if (!text || typeof text !== 'string') return null;
 
     const cleanedText = text.trim().toLowerCase();
     const words = cleanedText.split(/\s+/);
@@ -19,7 +19,7 @@ function extractFirstName(text) {
         return capitalizedName(explicitMatch[1]);
     }
 
-    // Prioridade 2: Busca pelo padrão "[NOME] aqui". Resolve o seu caso de teste.
+    // Prioridade 2: Busca pelo padrão "[NOME] aqui". Resolve o caso de teste.
     if (words.length === 2 && words[1] === 'aqui') {
         return capitalizedName(words[0]);
     }
@@ -27,33 +27,24 @@ function extractFirstName(text) {
     // Prioridade 3: Se o usuário enviar apenas uma palavra, é provável que seja o nome.
     if (words.length === 1) {
         const singleWord = words[0].replace(/[^a-záàãâéêíóôõúç]/gi, '');
-        // Valida se a palavra única tem mais de 2 caracteres para não capturar "oi", "ok", etc.
-        if (singleWord.length > 2) {
+        if (singleWord.length > 2) { // Evita capturar "oi", "ok", etc.
             return capitalizedName(singleWord);
         }
     }
     
-    // Prioridade 4 (Fallback): Se a frase tiver duas palavras e não se encaixar nos padrões acima,
-    // assume que a primeira é o nome. Cobre "João Silva".
+    // Prioridade 4 (Fallback): Se a frase tiver duas palavras, assume que a primeira é o nome.
+    // Cobre "João Silva" e frases curtas como "É o João".
     if (words.length === 2) {
          const firstWord = words[0].replace(/[^a-záàãâéêíóôõúç]/gi, '');
-         if (firstWord) {
+         if (firstWord && firstWord.length > 2) {
               return capitalizedName(firstWord);
          }
     }
     
-    // Último Recurso: Se for uma frase mais longa, pega a última palavra,
-    // que pode ser uma assinatura como "Atenciosamente, João".
-    if (words.length > 2) {
-        const lastWord = words[words.length - 1].replace(/[^a-záàãâéêíóôõúç]/gi, '');
-        if (lastWord.length > 2) {
-            return capitalizedName(lastWord);
-        }
-    }
-    
-    // Se absolutamente nenhuma heurística funcionar, retorna um padrão seguro.
-    return 'Cliente';
+    // Se nenhuma heurística funcionar, retorna null para indicar que o nome não foi encontrado.
+    return null;
 }
+
 
 function getRandomResponse(responses) {
     if (!responses || responses.length === 0) return '';
