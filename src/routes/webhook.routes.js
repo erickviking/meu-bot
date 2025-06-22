@@ -4,10 +4,7 @@ const { processIncomingMessage, verifyWebhook } = require('../handlers/webhook.h
 
 const router = express.Router();
 
-// A rota POST /webhook é processada pelo handler.
 router.post('/webhook', processIncomingMessage);
-
-// A rota GET /webhook é usada apenas para a verificação inicial da Meta.
 router.get('/webhook', verifyWebhook);
 
 module.exports = router;
