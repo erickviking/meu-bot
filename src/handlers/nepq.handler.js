@@ -1,6 +1,6 @@
 const config = require('../config');
 const { OpenAI } = require('openai');
-const { detetarObjeção } = require('./objection.handler'); // Importamos o novo módulo
+// Removido: extractFirstName e detetarObjeção não são mais necessários aqui.
 const openai = new OpenAI({ apiKey: config.openai.apiKey });
 
 // VERSÃO DEFINITIVA DO SYSTEM PROMPT, INCORPORANDO TODAS AS DIRETRIZES ESTRATÉGICAS.
@@ -69,15 +69,9 @@ Finalize com um convite claro para o agendamento: "Se fizer sentido para você, 
 
 async function getLlmReply(session, latestMessage) {
     try {
-        // Passo 1: Tenta detetar uma objeção com script pronto.
-        const respostaObjeção = detetarObjeção(latestMessage, session.firstName);
-        if (respostaObjeção) {
-            session.conversationHistory.push({ role: 'user', content: latestMessage });
-            session.conversationHistory.push({ role: 'assistant', content: respostaObjeção });
-            return respostaObjeção;
-        }
+        // A lógica de detecção de objeção foi removida daqui, pois
+        // a LLM agora tem a autonomia para lidar com isso.
 
-        // Passo 2: Se não é uma objeção conhecida, prossegue com a chamada à LLM.
         const messages = [
             { role: 'system', content: systemPrompt },
             ...session.conversationHistory,
@@ -124,4 +118,5 @@ async function getLlmReply(session, latestMessage) {
     }
 }
 
+// A função handleInitialMessage foi removida. A LLM agora gerencia todo o fluxo.
 module.exports = { getLlmReply };
