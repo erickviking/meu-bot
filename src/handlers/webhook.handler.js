@@ -1,5 +1,4 @@
 // src/handlers/webhook.handler.js
-const config = require('../config');
 const sessionManager = require('../services/sessionManager');
 const whatsappService = require('../services/whatsappService');
 const { getLlmReply, handleInitialMessage } = require('./nepq.handler');
@@ -15,12 +14,13 @@ async function processIncomingMessage(req, res) {
         const from = messageData.from;
         const text = messageData.text.body;
 
-        // Comando de reset
         if (text.toLowerCase() === '/novaconversa') {
-            await sessionManager.client.del(`session:${from}`);
+            await sessionManager.resetSession(from); // Usando a nova função centralizada
             console.log(`✅ Sessão para ${from} foi resetada manualmente.`);
+            
             const newSession = await sessionManager.getSession(from);
             const replyText = handleInitialMessage(newSession, text); // Usa o fluxo inicial
+            
             await sessionManager.saveSession(from, newSession);
             await whatsappService.sendMessage(from, replyText);
             return res.sendStatus(200);
@@ -30,8 +30,6 @@ async function processIncomingMessage(req, res) {
         
         let replyText = handleInitialMessage(session, text);
 
-        // Se handleInitialMessage retornou null, significa que a fase inicial acabou
-        // e devemos prosseguir para a conversa principal com a LLM.
         if (replyText === null) {
             replyText = await getLlmReply(session, text);
         }
@@ -48,6 +46,7 @@ async function processIncomingMessage(req, res) {
 }
 
 function verifyWebhook(req, res) {
+    const config = require('../config');
     const VERIFY_TOKEN = config.whatsapp.verifyToken;
 
     if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
