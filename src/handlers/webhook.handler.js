@@ -1,4 +1,3 @@
-// src/handlers/webhook.handler.js
 const config = require('../config');
 const sessionManager = require('../services/sessionManager');
 const whatsappService = require('../services/whatsappService');
@@ -42,8 +41,8 @@ async function processIncomingMessage(req, res) {
             const bufferedData = messageBuffer.get(from);
             if (!bufferedData) return; // Segurança extra
 
-            // Une todas as mensagens acumuladas em um único texto coeso.
-            const combinedText = bufferedData.messages.join('. ');
+            // Une todas as mensagens acumuladas com quebra de linha para manter o contexto do chat.
+            const combinedText = bufferedData.messages.join('\n');
             console.log(`[Debounce] Timer para ${from} finalizado. Processando texto combinado: "${combinedText}"`);
             
             try {
