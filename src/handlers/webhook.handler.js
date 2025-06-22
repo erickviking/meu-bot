@@ -1,10 +1,10 @@
 const config = require('../config');
 const sessionManager = require('../services/sessionManager');
 const whatsappService = require('../services/whatsappService');
-const { getLlmReply, handleInitialMessage } = require('./nepq.handler');
+const { getLlmReply } = require('./nepq.handler'); // Agora importamos apenas a função correta
 
-// Buffer para gerenciar tanto os timers quanto as mensagens agrupadas por usuário.
-const messageBuffer = new Map();
+// Usamos um Map em memória para gerenciar os timers. 
+const debounceTimers = new Map();
 
 async function processIncomingMessage(req, res) {
     try {
@@ -17,66 +17,47 @@ async function processIncomingMessage(req, res) {
         const from = messageData.from;
         const text = messageData.text.body;
 
-        // --- LÓGICA DE DEBOUNCING COM AGRUPAMENTO DE MENSAGENS ---
-
-        // 1. Verifica se já existe um buffer para este usuário.
-        if (messageBuffer.has(from)) {
-            const bufferData = messageBuffer.get(from);
-            
-            // Cancela o timer anterior para dar prioridade à nova atividade.
-            clearTimeout(bufferData.timer);
-            
-            // Adiciona a nova mensagem ao buffer existente.
-            bufferData.messages.push(text);
-            console.log(`[Buffer] Mensagem adicionada para ${from}. Buffer atual: ${bufferData.messages.length} mensagens.`);
-
-        } else {
-            // Se não existe, cria um novo buffer para este usuário.
-            messageBuffer.set(from, { messages: [text], timer: null });
-            console.log(`[Buffer] Novo buffer criado para ${from}.`);
+        // Se o comando for /novaconversa, limpa a sessão ANTES de processar
+        if (text.toLowerCase() === '/novaconversa') {
+            await sessionManager.client.del(`session:${from}`);
+            console.log(`✅ Sessão para ${from} foi reiniciada.`);
         }
 
-        // 2. Cria um novo timer de 3 segundos.
-        const newTimer = setTimeout(async () => {
-            const bufferedData = messageBuffer.get(from);
-            if (!bufferedData) return; // Segurança extra
+        // Lógica de Debouncing para agrupar mensagens rápidas
+        if (debounceTimers.has(from)) {
+            clearTimeout(debounceTimers.get(from).timer);
+            debounceTimers.get(from).messages.push(text);
+        } else {
+            debounceTimers.set(from, { messages: [text], timer: null });
+        }
 
-            // Une todas as mensagens acumuladas com quebra de linha para manter o contexto do chat.
-            const combinedText = bufferedData.messages.join('\n');
-            console.log(`[Debounce] Timer para ${from} finalizado. Processando texto combinado: "${combinedText}"`);
+        const newTimer = setTimeout(async () => {
+            const bufferData = debounceTimers.get(from);
+            if (!bufferData) return;
+
+            const combinedText = bufferData.messages.join('\n');
             
             try {
-                // A lógica principal agora roda DENTRO do callback, usando o texto combinado.
+                // A lógica inteira é agora delegada diretamente à LLM em todas as interações.
                 const session = await sessionManager.getSession(from);
-                
-                let replyText = handleInitialMessage(session, combinedText);
-
-                if (replyText === null) {
-                    replyText = await getLlmReply(session, combinedText);
-                }
+                const replyText = await getLlmReply(session, combinedText);
                 
                 await sessionManager.saveSession(from, session);
                 await whatsappService.sendMessage(from, replyText);
-
             } catch (processingError) {
                 console.error('❌ Erro durante o processamento assíncrono do debounce:', processingError);
             } finally {
-                // Limpa o buffer para este usuário após o processamento.
-                messageBuffer.delete(from);
+                debounceTimers.delete(from);
             }
-        }, 3000); // Delay de 3 segundos
+        }, 3000);
 
-        // 3. Armazena o ID do novo timer no buffer.
-        messageBuffer.get(from).timer = newTimer;
+        debounceTimers.get(from).timer = newTimer;
 
-        // --- FIM DA LÓGICA DE DEBOUNCING ---
-
-        // Responde IMEDIATAMENTE à Meta com status 200 para confirmar o recebimento.
-        // O processamento real e a resposta ao usuário acontecerão de forma assíncrona.
         res.sendStatus(200);
 
     } catch (error) {
         console.error('❌ Erro fatal no webhook handler:', error);
+        res.sendStatus(500);
     }
 }
 
