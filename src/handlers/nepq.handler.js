@@ -34,7 +34,7 @@ Essa etapa deve ser construída com atenção total ao que o paciente disse nas 
 1.  **Empatia Verdadeira:** Comece validando os sentimentos e a decisão do paciente de buscar ajuda.
 2.  **Resumo Focado na Dor Pessoal:** Retome os principais pontos mencionados: sintomas, tempo de dor, impacto emocional e funcional.
 3.  **Conexão com a Solução do Dr. Quelson:** Explique que a abordagem dele é profunda, investigativa e personalizada, diferente do que o paciente já viveu, voltada para tratar a raiz do problema relatado. Foque em mostrar que o Dr. Quelson vai direto à causa do problema, não trata apenas o sintoma.
-4.  **Depoimentos e experiências de outros pacientes (prova social): Compartilhe brevemente o que outros pacientes relatam após a consulta. Diga que muitos expressam alívio emocional por finalmente entenderem o que têm e saem com um plano claro. Ressalte que quem realmente quer resolver considera a consulta um dos melhores investimentos que já fez, por evitar meses ou anos de sofrimento e gastos ineficazes.
+4.  **Depoimentos e experiências de outros pacientes (prova social):** Compartilhe brevemente o que outros pacientes relatam após a consulta. Diga que muitos expressam alívio emocional por finalmente entenderem o que têm e saem com um plano claro. Ressalte que quem realmente quer resolver considera a consulta um dos melhores investimentos que já fez, por evitar meses ou anos de sofrimento e gastos ineficazes.
 5.  **Justificativa do Valor:** Aprofunde o valor percebido com base na diferença entre esse tipo de atendimento e o que o paciente já viveu. Deixe claro que esse é um atendimento particular exatamente para garantir tempo, escuta e profundidade.
 6.  **Informar Valor e Condições:** Agora sim, você pode informar o preço da consulta, justificando com base em tudo que foi construído na conversa. Informe com naturalidade o valor, conectando diretamente à proposta de solução definitiva, escuta verdadeira e plano individualizado. Nunca peça desculpas pelo preço. Afirme com convicção o valor que isso entrega. Também é o momento de deixar claro que, por seguir esse modelo de atendimento aprofundado e personalizado, o consultório não atende por planos de saúde.
 7.  **Convite à Ação Concreta:** Proponha gentilmente o agendamento como o próximo passo lógico. Sempre pergunte sobre o melhor dia ou período (manhã ou tarde) para verificar os horários disponíveis.
@@ -93,20 +93,36 @@ async function getLlmReply(session, latestMessage) {
 }
 
 function handleInitialMessage(session, message) {
+    const msg = message.trim();
+
+    // 1. Primeira interação — perguntar o nome
     if (!session.askedName) {
         session.askedName = true;
         return `Olá! Bem-vindo(a) ao consultório do Dr. Quelson. Sou a secretária virtual "Ana". Com quem eu tenho o prazer de falar? 😊`;
-    } 
-    else {
-        session.firstName = extractFirstName(message);
-        const welcomeMessage = `Oi, ${session.firstName}! É um prazer falar com você. 😊 O que te motivou a procurar o Dr. Quelson hoje?`;
-        
-        session.conversationHistory = []; // Reseta o histórico para uma nova conversa limpa
-        session.conversationHistory.push({ role: 'user', content: `Meu nome é ${session.firstName}.` });
+    }
+
+    // 2. Aguarda o nome do paciente e valida a resposta
+    if (!session.firstName) {
+        const name = extractFirstName(msg);
+
+        // Validação da extração do nome
+        if (!name) {
+            return `Desculpe, não consegui identificar seu nome. 🙈 Poderia me dizer apenas como devo te chamar?`;
+        }
+
+        session.firstName = name;
+
+        const welcomeMessage = `Oi, ${name}! É um prazer falar com você. 😊 O que te motivou a procurar o Dr. Quelson hoje?`;
+
+        session.conversationHistory = []; // Limpa histórico anterior
+        session.conversationHistory.push({ role: 'user', content: `Meu nome é ${name}.` });
         session.conversationHistory.push({ role: 'assistant', content: welcomeMessage });
-        
+
         return welcomeMessage;
     }
+
+    // 3. Se já temos o nome, sinaliza para o webhook prosseguir
+    return null;
 }
 
 module.exports = { getLlmReply, handleInitialMessage };
