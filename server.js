@@ -1,16 +1,16 @@
 // server.js
 require('dotenv').config();
-const app = require('./src/app'); // Importa a configuração do app Express
 
-const PORT = process.env.PORT || 3000;
+// Valida as variáveis de ambiente antes de qualquer outra coisa
+const config = require('./src/config');
+const app = require('./src/app');
 
-const server = app.listen(PORT, () => {
-    console.log('🚀🛡️ === SECRETÁRIA NEPQ BLINDADA v4.0 (Arquitetura Modular) === 🛡️🚀');
-    console.log(`📍 Servidor rodando na porta: ${PORT}`);
-    // Adicione outros logs de inicialização que desejar aqui
+const server = app.listen(config.port, () => {
+    console.log(`🚀🛡️ === SECRETÁRIA NEPQ BLINDADA v2.0 (Arquitetura Final) === 🛡️🚀`);
+    console.log(`📍 Servidor rodando na porta: ${config.port}`);
+    console.log(`💾 Persistência: ${config.redisUrl ? 'Redis Ativo' : 'Fallback para Memória'}`);
 });
 
-// Lógica para desligamento seguro (Graceful Shutdown)
 process.on('SIGTERM', () => {
     console.log('📴 Recebido SIGTERM, iniciando shutdown graceful...');
     server.close(async () => {
