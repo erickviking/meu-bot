@@ -1,38 +1,48 @@
 const config = require('../config');
 const sessionManager = require('../services/sessionManager');
 const whatsappService = require('../services/whatsappService');
-// ATENÇÃO: Agora só importamos UMA função, a principal.
-const { getLlmReply } = require('./nepq.handler');
+const { getLlmReply, handleInitialMessage } = require('./nepq.handler');
+
+async function sendMultiPartMessage(to, fullText) {
+    if (!fullText) return;
+    const paragraphs = fullText.split('\n\n').filter(p => p.trim().length > 0);
+
+    for (let i = 0; i < paragraphs.length; i++) {
+        const paragraph = paragraphs[i];
+        await whatsappService.sendMessage(to, paragraph);
+        if (i < paragraphs.length - 1) {
+            const delay = 1200 + Math.random() * 800;
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+}
 
 async function processIncomingMessage(req, res) {
     try {
         const messageData = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
         if (!messageData || messageData.type !== 'text' || !messageData.text?.body) {
-            // Ignora qualquer coisa que não seja uma mensagem de texto.
             return res.sendStatus(200);
         }
 
         const from = messageData.from;
         const text = messageData.text.body;
 
-        // Comando de reset agora apenas limpa a sessão. A LLM cuidará da nova saudação.
         if (text.toLowerCase() === '/novaconversa') {
-            await sessionManager.client.del(`session:${from}`);
-            console.log(`✅ Sessão para ${from} foi resetada.`);
+            await sessionManager.resetSession(from);
+            console.log(`✅ Sessão para ${from} foi resetada manualmente.`);
         }
 
         const session = await sessionManager.getSession(from);
         
-        // A lógica inteira agora é delegada à LLM em todas as interações.
-        // Não há mais a necessidade de um fluxo separado para o onboarding.
-        const replyText = await getLlmReply(session, text);
-        
-        // Salva a sessão com o histórico atualizado pela função getLlmReply.
-        await sessionManager.saveSession(from, session);
+        let replyText = handleInitialMessage(session, text);
 
-        // Envia a resposta gerada pela IA para o usuário.
-        await whatsappService.sendMessage(from, replyText);
+        if (replyText === null) {
+            replyText = await getLlmReply(session, text);
+        }
+        
+        await sessionManager.saveSession(from, session);
+        await sendMultiPartMessage(from, replyText);
 
         res.sendStatus(200);
 
