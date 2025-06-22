@@ -61,6 +61,12 @@ Finalize com um convite claro para o agendamento: "Se fizer sentido para você, 
 `;
 
 
+/**
+ * Função única que gerencia toda a lógica de conversação delegando à LLM.
+ * @param {object} session - O objeto de sessão do usuário.
+ * @param {string} latestMessage - A última mensagem enviada pelo usuário.
+ * @returns {string} A resposta gerada pela IA.
+ */
 async function getLlmReply(session, latestMessage) {
     try {
         const messages = [
@@ -73,14 +79,33 @@ async function getLlmReply(session, latestMessage) {
             model: 'gpt-4o',
             messages,
             temperature: 0.7,
-            max_tokens: 450, // Aumentado para acomodar a resposta de fechamento completa e detalhada
+            max_tokens: 450,
         });
 
         const botReply = response.choices[0].message.content;
 
+        // Atualiza o histórico para a próxima interação
         session.conversationHistory.push({ role: 'user', content: latestMessage });
         session.conversationHistory.push({ role: 'assistant', content: botReply });
 
+        // Atualiza o nome na sessão, se for a primeira vez
+        if (!session.firstName) {
+            // Pede à própria IA para extrair o nome do histórico
+            const nameExtractionResponse = await openai.chat.completions.create({
+                model: 'gpt-4o',
+                messages: [
+                    ...messages, // usa o mesmo contexto da conversa
+                    { role: 'assistant', content: botReply },
+                    { role: 'user', content: 'Baseado em nosso diálogo até agora, qual é o primeiro nome do paciente? Responda apenas com o nome.' }
+                ],
+                max_tokens: 10
+            });
+            const extractedName = nameExtractionResponse.choices[0].message.content.trim();
+            if (extractedName && extractedName.length > 2) {
+                session.firstName = extractedName.split(' ')[0];
+            }
+        }
+        
         if (session.conversationHistory.length > 20) {
             session.conversationHistory = session.conversationHistory.slice(-20);
         }
@@ -92,37 +117,4 @@ async function getLlmReply(session, latestMessage) {
     }
 }
 
-function handleInitialMessage(session, message) {
-    const msg = message.trim();
-
-    // 1. Primeira interação — perguntar o nome
-    if (!session.askedName) {
-        session.askedName = true;
-        return `Olá! Bem-vindo(a) ao consultório do Dr. Quelson. Sou a secretária virtual "Ana". Com quem eu tenho o prazer de falar? 😊`;
-    }
-
-    // 2. Aguarda o nome do paciente e valida a resposta
-    if (!session.firstName) {
-        const name = extractFirstName(msg);
-
-        // Validação da extração do nome
-        if (!name) {
-            return `Desculpe, não consegui identificar seu nome. 🙈 Poderia me dizer apenas como devo te chamar?`;
-        }
-
-        session.firstName = name;
-
-        const welcomeMessage = `Oi, ${name}! É um prazer falar com você. 😊 O que te motivou a procurar o Dr. Quelson hoje?`;
-
-        session.conversationHistory = []; // Limpa histórico anterior
-        session.conversationHistory.push({ role: 'user', content: `Meu nome é ${name}.` });
-        session.conversationHistory.push({ role: 'assistant', content: welcomeMessage });
-
-        return welcomeMessage;
-    }
-
-    // 3. Se já temos o nome, sinaliza para o webhook prosseguir
-    return null;
-}
-
-module.exports = { getLlmReply, handleInitialMessage };
+module.exports = { getLlmReply };
