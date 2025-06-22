@@ -1,11 +1,10 @@
 // src/services/sessionManager.js
 const redis = require('redis');
+const config = require('../config');
 
 class SessionManager {
     constructor() {
-        this.client = redis.createClient({
-            url: process.env.REDIS_URL || 'redis://localhost:6379'
-        });
+        this.client = redis.createClient({ url: config.redisUrl });
         this.client.on('error', (err) => {
             console.error('❌ Redis error:', err);
             this.fallbackToMemory = true;
@@ -26,9 +25,7 @@ class SessionManager {
         return {
             firstName: null,
             askedName: false,
-            nepqStage: 'situation_start', // Ponto inicial da jornada NEPQ
             conversationHistory: [],
-            // ... outros campos que você queira inicializar
         };
     }
 
@@ -36,14 +33,13 @@ class SessionManager {
         try {
             if (this.fallbackToMemory) return this.getSessionFromMemory(phone);
             const sessionData = await this.client.get(`session:${phone}`);
-            if (sessionData) {
-                return JSON.parse(sessionData);
-            }
+            if (sessionData) return JSON.parse(sessionData);
+
             const newSession = this.createNewSession();
             await this.saveSession(phone, newSession);
             return newSession;
         } catch (error) {
-            console.error('⚠️ Redis getSession falhou, usando memory fallback:', error.message);
+            console.error('⚠️ Redis getSession falhou:', error.message);
             this.fallbackToMemory = true;
             return this.getSessionFromMemory(phone);
         }
@@ -56,10 +52,23 @@ class SessionManager {
                 this.memoryCache.set(phone, session);
                 return;
             }
-            await this.client.setEx(`session:${phone}`, 86400, JSON.stringify(session)); // 24h
+            await this.client.setEx(`session:${phone}`, 86400, JSON.stringify(session)); // 24h TTL
         } catch (error) {
-            console.error('⚠️ Redis saveSession falhou, usando memory:', error.message);
+            console.error('⚠️ Redis saveSession falhou:', error.message);
             this.memoryCache.set(phone, session);
+        }
+    }
+    
+    async resetSession(phone) {
+        try {
+            if (this.fallbackToMemory) {
+                this.memoryCache.delete(phone);
+                return;
+            }
+             await this.client.del(`session:${phone}`);
+        } catch (error) {
+            console.error('⚠️ Redis resetSession falhou:', error.message);
+            this.memoryCache.delete(phone);
         }
     }
 
@@ -78,5 +87,4 @@ class SessionManager {
     }
 }
 
-// Exportamos uma única instância para ser usada em toda a aplicação (Singleton Pattern)
 module.exports = new SessionManager();
