@@ -1,17 +1,15 @@
+# Arquivo .env com chaves secretas
 .env
-node_modules/
-ngrok.exe
-*.log
 
-# System files
+# Dependências do Node.js
+node_modules/
+
+# Logs e arquivos de sistema operacional
+*.log
 .DS_Store
 Thumbs.db
 
-# Editor directories and files
+# Ferramentas de desenvolvimento e arquivos de editor
 .vscode/
 .idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+ngrok.exe
