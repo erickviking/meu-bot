@@ -9,31 +9,30 @@ async function processIncomingMessage(req, res) {
         const messageData = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
         if (!messageData || messageData.type !== 'text' || !messageData.text?.body) {
-            console.log('Webhook ignorado (não é mensagem de texto).');
             return res.sendStatus(200);
         }
 
         const from = messageData.from;
         const text = messageData.text.body;
 
-        // Comando para resetar a sessão para fins de teste
+        // Comando de reset
         if (text.toLowerCase() === '/novaconversa') {
             await sessionManager.client.del(`session:${from}`);
-            console.log(`✅ Sessão para ${from} foi resetada manualmente via comando.`);
-            const newSessionOnReset = await sessionManager.getSession(from);
-            const initialReply = handleInitialMessage(newSessionOnReset, text);
-            await sessionManager.saveSession(from, newSessionOnReset);
-            await whatsappService.sendMessage(from, initialReply);
+            console.log(`✅ Sessão para ${from} foi resetada manualmente.`);
+            const newSession = await sessionManager.getSession(from);
+            const replyText = handleInitialMessage(newSession, text); // Usa o fluxo inicial
+            await sessionManager.saveSession(from, newSession);
+            await whatsappService.sendMessage(from, replyText);
             return res.sendStatus(200);
         }
 
         const session = await sessionManager.getSession(from);
         
-        let replyText = '';
+        let replyText = handleInitialMessage(session, text);
 
-        if (!session.firstName) {
-            replyText = handleInitialMessage(session, text);
-        } else {
+        // Se handleInitialMessage retornou null, significa que a fase inicial acabou
+        // e devemos prosseguir para a conversa principal com a LLM.
+        if (replyText === null) {
             replyText = await getLlmReply(session, text);
         }
         
@@ -48,7 +47,6 @@ async function processIncomingMessage(req, res) {
     }
 }
 
-// ===== A FUNÇÃO QUE FALTAVA FOI ADICIONADA AQUI =====
 function verifyWebhook(req, res) {
     const VERIFY_TOKEN = config.whatsapp.verifyToken;
 
@@ -60,6 +58,5 @@ function verifyWebhook(req, res) {
         res.sendStatus(403);
     }
 }
-// ======================================================
 
 module.exports = { processIncomingMessage, verifyWebhook };
