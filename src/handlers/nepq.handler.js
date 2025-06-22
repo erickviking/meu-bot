@@ -2,6 +2,7 @@
 const config = require('../config');
 const { OpenAI } = require('openai');
 const { extractFirstName } = require('../utils/helpers');
+const { detetarObjeção } = require('./objection.handler');
 const openai = new OpenAI({ apiKey: config.openai.apiKey });
 
 // VERSÃO DEFINITIVA DO SYSTEM PROMPT, INCORPORANDO TODAS AS DIRETRIZES ESTRATÉGICAS.
@@ -69,6 +70,16 @@ Finalize com um convite claro para o agendamento: "Se fizer sentido para você, 
  */
 async function getLlmReply(session, latestMessage) {
     try {
+        // Passo 1: Tenta detetar uma objeção com script pronto.
+        const respostaObjeção = detetarObjeção(latestMessage, session.firstName);
+        if (respostaObjeção) {
+            // Se encontrou uma objeção, usa a resposta de alta conversão e encerra.
+            session.conversationHistory.push({ role: 'user', content: latestMessage });
+            session.conversationHistory.push({ role: 'assistant', content: respostaObjeção });
+            return respostaObjeção;
+        }
+
+        // Passo 2: Se não é uma objeção conhecida, prossegue com a chamada à LLM.
         const messages = [
             { role: 'system', content: systemPrompt },
             ...session.conversationHistory,
@@ -84,28 +95,9 @@ async function getLlmReply(session, latestMessage) {
 
         const botReply = response.choices[0].message.content;
 
-        // Atualiza o histórico para a próxima interação
         session.conversationHistory.push({ role: 'user', content: latestMessage });
         session.conversationHistory.push({ role: 'assistant', content: botReply });
 
-        // Atualiza o nome na sessão, se for a primeira vez
-        if (!session.firstName) {
-            // Pede à própria IA para extrair o nome do histórico
-            const nameExtractionResponse = await openai.chat.completions.create({
-                model: 'gpt-4o',
-                messages: [
-                    ...messages, // usa o mesmo contexto da conversa
-                    { role: 'assistant', content: botReply },
-                    { role: 'user', content: 'Baseado em nosso diálogo até agora, qual é o primeiro nome do paciente? Responda apenas com o nome.' }
-                ],
-                max_tokens: 10
-            });
-            const extractedName = nameExtractionResponse.choices[0].message.content.trim();
-            if (extractedName && extractedName.length > 2) {
-                session.firstName = extractedName.split(' ')[0];
-            }
-        }
-        
         if (session.conversationHistory.length > 20) {
             session.conversationHistory = session.conversationHistory.slice(-20);
         }
@@ -117,4 +109,38 @@ async function getLlmReply(session, latestMessage) {
     }
 }
 
-module.exports = { getLlmReply };
+// A lógica de onboarding permanece a mesma, robusta e funcional
+function handleInitialMessage(session, message) {
+    const currentState = session.onboardingState;
+
+    if (currentState === 'start') {
+        session.onboardingState = 'awaiting_name';
+        return `Olá! Bem-vindo(a) ao consultório do Dr. Quelson. Sou a secretária virtual "Ana". Com quem eu tenho o prazer de falar? 😊`;
+    }
+
+    if (currentState === 'awaiting_name') {
+        const { formatAsName } = require('../utils/helpers');
+        const potentialName = formatAsName(message);
+        const invalidNames = ['oi', 'ola', 'bom', 'boa', 'tarde', 'noite', 'dia'];
+        
+        if (!potentialName || invalidNames.includes(potentialName.toLowerCase())) {
+            return `Desculpe, não consegui identificar seu nome. Por favor, me diga apenas como devo te chamar.`;
+        }
+        
+        session.firstName = potentialName;
+        session.onboardingState = 'complete';
+
+        const welcomeMessage = `Perfeito, ${potentialName}! É um prazer falar com você. 😊 Para eu te ajudar da melhor forma, pode me contar o que te motivou a procurar o Dr. Quelson hoje?`;
+
+        session.conversationHistory = [];
+        session.conversationHistory.push({ role: 'user', content: `Meu nome é ${potentialName}.` });
+        session.conversationHistory.push({ role: 'assistant', content: welcomeMessage });
+
+        return welcomeMessage;
+    }
+
+    return null;
+}
+
+module.exports = { getLlmReply, handleInitialMessage };
+
