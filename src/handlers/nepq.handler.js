@@ -1,7 +1,5 @@
 const config = require('../config');
 const { OpenAI } = require('openai');
-const { formatAsName } = require('../utils/helpers');
-
 const openai = new OpenAI({ apiKey: config.openai.apiKey });
 
 const systemPrompt = `
