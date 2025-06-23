@@ -62,6 +62,8 @@ async function getLlmReply(session, latestMessage) {
         const messages = [
             { role: 'system', content: systemPrompt },
             ...session.conversationHistory,
+            // A mensagem do usuário é adicionada aqui, mas o histórico já foi atualizado
+            // no webhook handler para o buffer.
             { role: 'user', content: latestMessage }
         ];
 
@@ -74,9 +76,28 @@ async function getLlmReply(session, latestMessage) {
 
         const botReply = response.choices[0].message.content;
 
+        // Atualiza o histórico com a interação completa
         session.conversationHistory.push({ role: 'user', content: latestMessage });
         session.conversationHistory.push({ role: 'assistant', content: botReply });
 
+        // Atualiza o nome na sessão se ainda não tiver sido definido
+        if (!session.firstName) {
+            const nameExtractionResponse = await openai.chat.completions.create({
+                model: 'gpt-4o',
+                messages: [
+                    ...messages,
+                    { role: 'assistant', content: botReply },
+                    { role: 'user', content: 'Baseado em nosso diálogo, qual o primeiro nome do paciente? Responda apenas com o nome, sem pontuação.' }
+                ],
+                max_tokens: 10
+            });
+            const extractedName = nameExtractionResponse.choices[0].message.content.trim().split(' ')[0];
+            if (extractedName && extractedName.length > 2) {
+                session.firstName = extractedName.charAt(0).toUpperCase() + extractedName.slice(1).toLowerCase();
+                console.log(`[LLM] Nome extraído: ${session.firstName}`);
+            }
+        }
+        
         if (session.conversationHistory.length > 20) {
             session.conversationHistory = session.conversationHistory.slice(-20);
         }
@@ -88,35 +109,4 @@ async function getLlmReply(session, latestMessage) {
     }
 }
 
-function handleInitialMessage(session, message) {
-    const currentState = session.onboardingState;
-
-    if (currentState === 'start') {
-        session.onboardingState = 'awaiting_name';
-        return `Olá! Bem-vindo(a) ao consultório do Dr. Quelson. Sou a secretária virtual "Ana". Com quem eu tenho o prazer de falar? 😊`;
-    }
-
-    if (currentState === 'awaiting_name') {
-        const potentialName = formatAsName(message);
-        const invalidNames = ['oi', 'ola', 'bom', 'boa', 'tarde', 'noite', 'dia'];
-        
-        if (!potentialName || invalidNames.includes(potentialName.toLowerCase())) {
-            return `Desculpe, não consegui identificar seu nome. Por favor, me diga apenas como devo te chamar.`;
-        }
-        
-        session.firstName = potentialName;
-        session.onboardingState = 'complete';
-
-        const welcomeMessage = `Perfeito, ${potentialName}! É um prazer falar com você. 😊 Para eu te ajudar da melhor forma, pode me contar o que te motivou a procurar o Dr. Quelson hoje?`;
-
-        session.conversationHistory = [];
-        session.conversationHistory.push({ role: 'user', content: `Meu nome é ${potentialName}.` });
-        session.conversationHistory.push({ role: 'assistant', content: welcomeMessage });
-
-        return welcomeMessage;
-    }
-
-    return null;
-}
-
-module.exports = { getLlmReply, handleInitialMessage };
+module.exports = { getLlmReply };
