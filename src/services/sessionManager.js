@@ -24,20 +24,35 @@ class SessionManager {
     createNewSession() {
         return {
             firstName: null,
-            askedName: false,
+            onboardingState: 'start', // Estados: 'start', 'awaiting_name', 'complete'
             conversationHistory: [],
+            messageBuffer: [], // Buffer para agrupar mensagens
         };
+    }
+
+    async resetSession(from) {
+        // Esta função agora está centralizada aqui.
+        const newSession = this.createNewSession();
+        await this.saveSession(from, newSession);
     }
 
     async getSession(phone) {
         try {
             if (this.fallbackToMemory) return this.getSessionFromMemory(phone);
             const sessionData = await this.client.get(`session:${phone}`);
-            if (sessionData) return JSON.parse(sessionData);
-
-            const newSession = this.createNewSession();
-            await this.saveSession(phone, newSession);
-            return newSession;
+            if (sessionData) {
+                const session = JSON.parse(sessionData);
+                // Garante que sessões antigas tenham os novos campos de estado
+                if (!session.onboardingState) {
+                    session.onboardingState = session.firstName ? 'complete' : 'start';
+                }
+                if (!session.messageBuffer) {
+                    session.messageBuffer = [];
+                }
+                return session;
+            }
+            // Se não houver sessão, cria uma nova.
+            return this.createNewSession();
         } catch (error) {
             console.error('⚠️ Redis getSession falhou:', error.message);
             this.fallbackToMemory = true;
@@ -58,19 +73,6 @@ class SessionManager {
             this.memoryCache.set(phone, session);
         }
     }
-    
-    async resetSession(phone) {
-        try {
-            if (this.fallbackToMemory) {
-                this.memoryCache.delete(phone);
-                return;
-            }
-             await this.client.del(`session:${phone}`);
-        } catch (error) {
-            console.error('⚠️ Redis resetSession falhou:', error.message);
-            this.memoryCache.delete(phone);
-        }
-    }
 
     getSessionFromMemory(phone) {
         if (!this.memoryCache.has(phone)) {
@@ -87,4 +89,5 @@ class SessionManager {
     }
 }
 
+// Exportamos uma única instância para ser usada em toda a aplicação (Singleton Pattern)
 module.exports = new SessionManager();
