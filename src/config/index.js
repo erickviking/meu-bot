@@ -7,13 +7,14 @@ const config = {
         token: process.env.WHATSAPP_TOKEN,
         phoneId: process.env.WHATSAPP_PHONE_ID,
         verifyToken: process.env.VERIFY_TOKEN,
+        appSecret: process.env.WHATSAPP_APP_SECRET, // Chave para segurança
     },
     openai: {
         apiKey: process.env.OPENAI_API_KEY
     },
     clinic: {
-        contactPhone: process.env.CONTACT_PHONE || '(XX) XXXX-XXXX',
-        consultationValue: process.env.CONSULTA_VALOR || '400'
+        contactPhone: process.env.CONTACT_PHONE,
+        consultationValue: process.env.CONSULTA_VALOR,
     }
 };
 
@@ -22,17 +23,17 @@ const requiredConfigs = [
     'whatsapp.token',
     'whatsapp.phoneId',
     'whatsapp.verifyToken',
+    'whatsapp.appSecret', // Validação adicionada
     'openai.apiKey',
     'redisUrl'
 ];
 
 const getConfigValue = (path) => path.split('.').reduce((acc, part) => acc && acc[part], config);
-
 const missingConfigs = requiredConfigs.filter(path => !getConfigValue(path));
 
 if (missingConfigs.length > 0) {
     console.error('❌ ERRO FATAL: Variáveis de ambiente críticas faltando:', missingConfigs.join(', '));
-    process.exit(1);
+    process.exit(1); // Impede a aplicação de iniciar sem a configuração correta.
 }
 
 module.exports = config;
