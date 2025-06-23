@@ -2,6 +2,7 @@ const config = require('../config');
 const sessionManager = require('../services/sessionManager');
 const whatsappService = require('../services/whatsappService');
 const { getLlmReply, handleInitialMessage } = require('./nepq.handler');
+const { simulateTypingDelay } = require('../utils/helpers'); // Importa a nova função
 
 async function sendMultiPartMessage(to, fullText) {
     if (!fullText) return;
@@ -11,8 +12,8 @@ async function sendMultiPartMessage(to, fullText) {
         const paragraph = paragraphs[i];
         await whatsappService.sendMessage(to, paragraph);
         if (i < paragraphs.length - 1) {
-            const delay = 1200 + Math.random() * 800;
-            await new Promise(resolve => setTimeout(resolve, delay));
+            const interMessageDelay = 1200 + Math.random() * 800;
+            await new Promise(resolve => setTimeout(resolve, interMessageDelay));
         }
     }
 }
@@ -28,6 +29,9 @@ async function processIncomingMessage(req, res) {
         const from = messageData.from;
         const text = messageData.text.body;
 
+        // Responde imediatamente ao webhook para evitar timeouts da Meta.
+        res.sendStatus(200);
+
         if (text.toLowerCase() === '/novaconversa') {
             await sessionManager.resetSession(from);
             console.log(`✅ Sessão para ${from} foi resetada manualmente.`);
@@ -40,15 +44,20 @@ async function processIncomingMessage(req, res) {
         if (replyText === null) {
             replyText = await getLlmReply(session, text);
         }
+
+        // --- LÓGICA DE DELAY INTELIGENTE ---
+        // Simula o bot "pensando" ou "digitando" antes de responder.
+        if (replyText) {
+            await simulateTypingDelay(replyText);
+        }
         
         await sessionManager.saveSession(from, session);
         await sendMultiPartMessage(from, replyText);
 
-        res.sendStatus(200);
-
     } catch (error) {
         console.error('❌ Erro fatal no webhook handler:', error);
-        res.sendStatus(500);
+        // Não enviamos mais res.sendStatus(500) porque já respondemos 200.
+        // Apenas logamos o erro para monitoramento.
     }
 }
 
