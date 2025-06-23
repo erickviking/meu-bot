@@ -1,7 +1,7 @@
 const config = require('../config');
 const sessionManager = require('../services/sessionManager');
 const whatsappService = require('../services/whatsappService');
-const { getLlmReply, handleInitialMessage } = require('./nepq.handler');
+const { getLlmReply } = require('./nepq.handler');
 const { simulateTypingDelay } = require('../utils/helpers');
 
 // Armazenamento em memória para gerenciar os temporizadores de debounce.
