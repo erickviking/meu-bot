@@ -74,7 +74,7 @@ async function processIncomingMessage(req, res) {
                     await sendMultiPartMessage(from, replyText);
                 }
                 debounceTimers.delete(from);
-            }, 3500); // Aguarda 3.5 segundos
+            }, 6000); // Aguarda 6.0 segundos
 
             debounceTimers.set(from, newTimer);
         }
