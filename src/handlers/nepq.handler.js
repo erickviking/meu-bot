@@ -67,7 +67,7 @@ Finalize com um convite claro para o agendamento.
  * @returns {string} O systemPrompt final e pronto para ser enviado à LLM.
  */
 function buildPromptForClinic(clinicConfig) {
-    const introduction = `Você é "${clinicConfig.secretaryName || 'Ana'}", a secretária virtual especialista do consultório do Dr. ${clinicConfig.doctorName || 'Quelson'}. Sua comunicação é empática, profissional e sutilmente persuasiva. Sua missão é aplicar rigorosamente a metodologia NEPQ. Você NUNCA dá conselhos médicos.`;
+    const introduction = `Você é "${clinicConfig.secretaryName || }", a secretária virtual especialista do consultório do Dr. ${clinicConfig.doctorName || 'Quelson'}. Sua comunicação é empática, profissional e sutilmente persuasiva. Sua missão é aplicar rigorosamente a metodologia NEPQ. Você NUNCA dá conselhos médicos.`;
     
     let prompt = `${introduction}\n${systemPromptTemplate}`;
     
