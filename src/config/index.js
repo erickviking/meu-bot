@@ -3,8 +3,7 @@ require('dotenv').config();
 const config = {
     port: process.env.PORT || 3000,
     redisUrl: process.env.REDIS_URL,
-    // NOVO: Adicionada a URL de conexão com o banco de dados
-    databaseUrl: process.env.DATABASE_URL,
+    databaseUrl: process.env.DATABASE_URL, // Pode manter, caso use em outro lugar.
     whatsapp: {
         token: process.env.WHATSAPP_TOKEN,
         phoneId: process.env.WHATSAPP_PHONE_ID,
@@ -13,6 +12,13 @@ const config = {
     openai: {
         apiKey: process.env.OPENAI_API_KEY
     },
+    // ### INÍCIO DA CORREÇÃO ###
+    // Adiciona a seção para ler as variáveis de ambiente do Supabase.
+    supabase: {
+        url: process.env.SUPABASE_URL,
+        apiKey: process.env.SUPABASE_API_KEY
+    }
+    // ### FIM DA CORREÇÃO ###
 };
 
 // Validação para garantir que a aplicação não inicie sem as chaves críticas.
@@ -22,7 +28,11 @@ const requiredConfigs = [
     'whatsapp.verifyToken',
     'openai.apiKey',
     'redisUrl',
-    'databaseUrl' // NOVO: Validação adicionada
+    // ### INÍCIO DA CORREÇÃO ###
+    // Adiciona as novas variáveis do Supabase à lista de validação.
+    'supabase.url',
+    'supabase.apiKey'
+    // ### FIM DA CORREÇÃO ###
 ];
 
 const getConfigValue = (path) => path.split('.').reduce((acc, part) => acc && acc[part], config);
