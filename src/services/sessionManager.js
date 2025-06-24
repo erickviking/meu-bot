@@ -1,6 +1,8 @@
 // src/services/sessionManager.js
 const redis = require('redis');
 const config = require('../config');
+// Importa o nosso novo serviço e o cliente Supabase
+const clinicService = require('./clinic.service');
 
 class SessionManager {
     constructor() {
@@ -24,39 +26,62 @@ class SessionManager {
     createNewSession() {
         return {
             firstName: null,
-            onboardingState: 'start', // Estados: 'start', 'awaiting_name', 'complete'
+            onboardingState: 'start',
             conversationHistory: [],
-            messageBuffer: [], // Buffer para agrupar mensagens
+            messageBuffer: [],
+            // A sessão agora pode armazenar a configuração da clínica
+            clinicConfig: null, 
         };
     }
 
     async resetSession(from) {
-        // Esta função agora está centralizada aqui.
         const newSession = this.createNewSession();
         await this.saveSession(from, newSession);
     }
 
     async getSession(phone) {
+        let session;
         try {
-            if (this.fallbackToMemory) return this.getSessionFromMemory(phone);
-            const sessionData = await this.client.get(`session:${phone}`);
-            if (sessionData) {
-                const session = JSON.parse(sessionData);
-                // Garante que sessões antigas tenham os novos campos de estado
-                if (!session.onboardingState) {
-                    session.onboardingState = session.firstName ? 'complete' : 'start';
-                }
-                if (!session.messageBuffer) {
-                    session.messageBuffer = [];
-                }
-                return session;
+            if (this.fallbackToMemory) {
+                session = this.getSessionFromMemory(phone);
+            } else {
+                const sessionData = await this.client.get(`session:${phone}`);
+                session = sessionData ? JSON.parse(sessionData) : this.createNewSession();
             }
-            // Se não houver sessão, cria uma nova.
-            return this.createNewSession();
+
+            // Garante que sessões antigas tenham os novos campos
+            if (!session.onboardingState) session.onboardingState = session.firstName ? 'complete' : 'start';
+            if (!session.messageBuffer) session.messageBuffer = [];
+
+            // ### INÍCIO DA LÓGICA MULTI-TENANT ###
+            // Se a configuração da clínica ainda não foi carregada para esta sessão...
+            if (!session.clinicConfig) {
+                console.log(`[Multi-Tenant] Configuração da clínica não encontrada para ${phone}. Buscando...`);
+                
+                // O ID do número do seu bot deve vir do seu arquivo de configuração
+                const botWhatsappId = config.whatsapp.phoneId;
+                const clinicConfig = await clinicService.getClinicConfigByWhatsappId(botWhatsappId);
+
+                if (clinicConfig) {
+                    console.log(`[Multi-Tenant] Clínica "${clinicConfig.doctorName}" carregada para a sessão.`);
+                    session.clinicConfig = clinicConfig;
+                    // Salva a sessão enriquecida de volta no Redis para futuras requisições
+                    await this.saveSession(phone, session);
+                } else {
+                    // CASO CRÍTICO: Não há clínica cadastrada para este número de bot.
+                    // O sistema não pode operar sem isso.
+                    console.error(`🚨 CRÍTICO: Nenhuma clínica encontrada para o whatsapp_phone_id: ${botWhatsappId}. Verifique o banco de dados.`);
+                    // Retornar a sessão sem a config fará com que o sistema falhe de forma controlada mais adiante.
+                }
+            }
+            // ### FIM DA LÓGICA MULTI-TENANT ###
+
+            return session;
+
         } catch (error) {
             console.error('⚠️ Redis getSession falhou:', error.message);
             this.fallbackToMemory = true;
-            return this.getSessionFromMemory(phone);
+            return this.getSessionFromMemory(phone); // Retorna do fallback em caso de erro
         }
     }
 
@@ -89,5 +114,4 @@ class SessionManager {
     }
 }
 
-// Exportamos uma única instância para ser usada em toda a aplicação (Singleton Pattern)
 module.exports = new SessionManager();
