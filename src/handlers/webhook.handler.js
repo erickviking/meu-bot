@@ -1,10 +1,10 @@
 const config = require('../config');
 const sessionManager = require('../services/sessionManager');
 const whatsappService = require('../services/whatsappService');
-const { getLlmReply } = require('./nepq.handler');
+const { getLlmReply, handleInitialMessage } = require('./nepq.handler');
 const { simulateTypingDelay } = require('../utils/helpers');
 
-// Armazenamento em memória para gerenciar os temporizadores.
+// Armazenamento em memória para gerenciar os temporizadores de debounce.
 const debounceTimers = new Map();
 
 // Função para enviar mensagens em múltiplos parágrafos.
@@ -13,6 +13,7 @@ async function sendMultiPartMessage(to, fullText) {
     const paragraphs = fullText.split('\n\n').filter(p => p.trim().length > 0);
     for (const paragraph of paragraphs) {
         await whatsappService.sendMessage(to, paragraph);
+        // Adiciona um delay entre os parágrafos para uma leitura mais natural
         if (paragraphs.length > 1) {
             const interMessageDelay = 1500 + Math.random() * 1000;
             await new Promise(resolve => setTimeout(resolve, interMessageDelay));
@@ -31,7 +32,6 @@ async function processBufferedMessages(from) {
     if (bufferedMessages.length === 0) return;
 
     const fullMessage = bufferedMessages.join('. ');
-    console.log(`[Debounce] Processando mensagem agrupada de ${from}: "${fullMessage}"`);
     
     // Limpa o buffer ANTES de processar para evitar condições de corrida.
     session.messageBuffer = [];
@@ -39,19 +39,20 @@ async function processBufferedMessages(from) {
     
     const replyText = await getLlmReply(session, fullMessage);
     
-    // "Pausa para Falar"
     if (replyText) {
+        // "Pausa para Falar" - simula o tempo de digitação.
         await simulateTypingDelay(replyText);
     }
     
-    await sessionManager.saveSession(from, session); // Salva o histórico atualizado pela LLM
+    await sessionManager.saveSession(from, session);
     await sendMultiPartMessage(from, replyText);
 
     debounceTimers.delete(from);
 }
 
 /**
- * O maestro do webhook, agora com a lógica de "Pausa para Ouvir".
+ * O maestro do webhook, agora com uma arquitetura de ritmo que distingue
+ * entre o onboarding (imediato) e a conversa principal (com delay).
  */
 async function processIncomingMessage(req, res) {
     try {
@@ -63,6 +64,7 @@ async function processIncomingMessage(req, res) {
         const from = messageData.from;
         const text = messageData.text.body;
 
+        // Responde IMEDIATAMENTE ao webhook da Meta para evitar timeouts.
         res.sendStatus(200);
 
         if (text.toLowerCase() === '/novaconversa') {
@@ -70,27 +72,41 @@ async function processIncomingMessage(req, res) {
             debounceTimers.delete(from);
             await sessionManager.resetSession(from);
             console.log(`✅ Sessão para ${from} foi resetada.`);
-            // A primeira resposta virá da LLM na próxima interação.
+            
+            const session = await sessionManager.getSession(from);
+            const replyText = handleInitialMessage(session, "");
+            await sessionManager.saveSession(from, session);
+            await sendMultiPartMessage(from, replyText);
             return;
         }
 
         const session = await sessionManager.getSession(from);
 
-        // --- LÓGICA DE DEBOUNCING (Pausa para Ouvir) ---
-        if (debounceTimers.has(from)) {
-            clearTimeout(debounceTimers.get(from));
+        // --- ARQUITETURA DE RITMO CONVERSACIONAL ---
+
+        // 1. Se o onboarding não estiver completo, processa a mensagem INSTANTANEAMENTE.
+        if (session.onboardingState !== 'complete') {
+            const replyText = handleInitialMessage(session, text);
+            await sessionManager.saveSession(from, session);
+            await sendMultiPartMessage(from, replyText);
+        } 
+        // 2. Se o onboarding estiver completo, entra na lógica de DEBOUNCING.
+        else {
+            if (debounceTimers.has(from)) {
+                clearTimeout(debounceTimers.get(from));
+            }
+
+            const userBuffer = session.messageBuffer || [];
+            userBuffer.push(text);
+            session.messageBuffer = userBuffer;
+            await sessionManager.saveSession(from, session);
+
+            const newTimer = setTimeout(() => {
+                processBufferedMessages(from);
+            }, 3500); // Aguarda 3.5 segundos por mais mensagens.
+
+            debounceTimers.set(from, newTimer);
         }
-
-        const userBuffer = session.messageBuffer || [];
-        userBuffer.push(text);
-        session.messageBuffer = userBuffer;
-        await sessionManager.saveSession(from, session);
-
-        const newTimer = setTimeout(() => {
-            processBufferedMessages(from);
-        }, 3500); // Aguarda 3.5 segundos por mais mensagens.
-
-        debounceTimers.set(from, newTimer);
 
     } catch (error) {
         console.error('❌ Erro fatal no webhook handler:', error);
