@@ -23,14 +23,14 @@ class SessionManager {
         });
     }
 
-    createNewSession() {
+     createNewSession() {
         return {
             firstName: null,
-            onboardingState: 'start',
+            onboardingState: 'start', // Podemos manter para o onboarding inicial
+            state: 'onboarding', // O NOVO ESTADO PRINCIPAL!
             conversationHistory: [],
             messageBuffer: [],
-            // A sessão agora pode armazenar a configuração da clínica
-            clinicConfig: null, 
+            clinicConfig: null,
         };
     }
 
