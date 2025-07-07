@@ -6,6 +6,7 @@ const { getLlmReply, handleInitialMessage } = require('./nepq.handler');
 const { simulateTypingDelay } = require('../utils/helpers');
 const { isEmergency, getEmergencyResponse } = require('../utils/emergencyDetector');
 const { detetarObjeção } = require('./objection.handler');
+const { saveMessage } = require('../services/message.service'); // <<< 1. ADICIONE ESTA IMPORTAÇÃO
 
 // Armazenamento em memória para gerenciar os temporizadores de debounce.
 const debounceTimers = new Map();
@@ -44,21 +45,28 @@ async function processBufferedMessages(from) {
     const fullMessage = bufferedMessages.join('. ');
     console.log(`[Debounce] Processando mensagem agrupada de ${from}: "${fullMessage}"`);
     
-    // Limpa o buffer ANTES de processar para evitar condições de corrida.
     session.messageBuffer = [];
     
-    // Chama a IA para obter a resposta e o possível novo estado.
     const llmResult = await getLlmReply(session, fullMessage);
     
-    // Atualiza o estado da sessão se a IA indicou uma mudança.
+    // <<< 2. INÍCIO DA MODIFICAÇÃO: Salvar a resposta do bot (outbound) >>>
+    // Fazemos isso aqui, logo após receber a resposta da IA.
+    if (session.clinicConfig && session.clinicConfig.id && llmResult.reply) {
+        await saveMessage({
+            content: llmResult.reply,
+            direction: 'outbound',
+            patient_phone: from,
+            clinic_id: session.clinicConfig.id
+        });
+    }
+    // <<< FIM DA MODIFICAÇÃO >>>
+
     if (llmResult.newState && llmResult.newState !== session.state) {
         session.state = llmResult.newState;
     }
     
-    // Salva a sessão com o histórico atualizado e o novo estado.
     await sessionManager.saveSession(from, session);
     
-    // Envia a resposta da IA para o usuário.
     if (llmResult.reply) {
         await simulateTypingDelay(llmResult.reply);
         await sendMultiPartMessage(from, llmResult.reply);
@@ -83,9 +91,8 @@ async function processIncomingMessage(req, res) {
         const from = messageData.from;
         const text = messageData.text.body;
 
-        res.sendStatus(200); // Responda à Meta imediatamente.
+        res.sendStatus(200);
 
-        // Comando de reset de sessão tem prioridade máxima.
         if (text.toLowerCase() === '/novaconversa') {
             if (debounceTimers.has(from)) clearTimeout(debounceTimers.get(from));
             debounceTimers.delete(from);
@@ -95,46 +102,54 @@ async function processIncomingMessage(req, res) {
             return;
         }
 
-        // Carrega a sessão, que já contém a FSM e a config da clínica.
         const session = await sessionManager.getSession(from);
 
-        // --- INÍCIO DO ESCUDO DE PROTEÇÃO (GUARDRAILS) ---
-        // 1. VERIFICAÇÃO DE EMERGÊNCIA (PRIORIDADE MÁXIMA)
+        // <<< 3. INÍCIO DA MODIFICAÇÃO: Salvar a mensagem do paciente (inbound) >>>
+        // Fazemos isso aqui, logo no início, para registrar tudo que chega.
+        if (session.clinicConfig && session.clinicConfig.id) {
+            await saveMessage({
+                content: text,
+                direction: 'inbound',
+                patient_phone: from,
+                clinic_id: session.clinicConfig.id
+            });
+        }
+        // <<< FIM DA MODIFICAÇÃO >>>
+
         if (isEmergency(text)) {
             console.log(`🚨 [Guardrail] Emergência detectada para ${from}.`);
             const emergencyResponse = getEmergencyResponse(session.firstName);
             await whatsappService.sendMessage(from, emergencyResponse);
-            return; // Interrompe o fluxo.
+            return;
         }
         
-        // --- LÓGICA DA MÁQUINA DE ESTADOS (FSM) ---
-        // Se o onboarding inicial ainda não foi concluído.
         if (session.onboardingState !== 'complete') {
             const onboardingResponse = handleInitialMessage(session, text, session.clinicConfig);
             if (onboardingResponse) {
-                await sessionManager.saveSession(from, session); // Salva o novo estado de onboarding
+                await sessionManager.saveSession(from, session);
                 await simulateTypingDelay(onboardingResponse);
                 await whatsappService.sendMessage(from, onboardingResponse);
                 return;
             }
         }
 
-        // Se o estado é 'closing_delivered', ativamos o detector de objeções.
         if (session.state === 'closing_delivered') {
             console.log(`[FSM] Estado 'closing_delivered'. Verificando objeções para: "${text}"`);
             const objectionResponse = detetarObjeção(text, session.firstName);
             if (objectionResponse) {
                 console.log(`💡 [Guardrail] Objeção pós-fechamento detectada.`);
+                // Salva a resposta da objeção também!
+                if (session.clinicConfig && session.clinicConfig.id) {
+                    await saveMessage({ content: objectionResponse, direction: 'outbound', patient_phone: from, clinic_id: session.clinicConfig.id });
+                }
                 await simulateTypingDelay(objectionResponse);
                 await whatsappService.sendMessage(from, objectionResponse);
-                return; // Interrompe o fluxo e aguarda a próxima resposta do usuário.
+                return;
             }
         }
 
-        // Se a mensagem passou por todas as verificações, ela segue para o fluxo normal com a IA.
         console.log(`[FSM] Mensagem de ${from} no estado '${session.state}' segue para a IA.`);
 
-        // --- FLUXO NORMAL DE CONVERSA (DEBOUNCING / LLM) ---
         if (debounceTimers.has(from)) {
             clearTimeout(debounceTimers.get(from));
         }
@@ -146,7 +161,7 @@ async function processIncomingMessage(req, res) {
 
         const newTimer = setTimeout(() => {
             processBufferedMessages(from);
-        }, 3500); // Aguarda 3.5 segundos por mais mensagens.
+        }, 3500);
 
         debounceTimers.set(from, newTimer);
 
