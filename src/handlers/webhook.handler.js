@@ -6,15 +6,13 @@ const { getLlmReply, handleInitialMessage } = require('./nepq.handler');
 const { simulateTypingDelay } = require('../utils/helpers');
 const { isEmergency, getEmergencyResponse } = require('../utils/emergencyDetector');
 const { detetarObjeção } = require('./objection.handler');
-const { saveMessage } = require('../services/message.service'); // <<< 1. ADICIONE ESTA IMPORTAÇÃO
+const { saveMessage } = require('../services/message.service');
 
 // Armazenamento em memória para gerenciar os temporizadores de debounce.
 const debounceTimers = new Map();
 
 /**
  * Envia mensagens longas divididas em múltiplos parágrafos para uma UX melhor.
- * @param {string} to - O número do destinatário.
- * @param {string} fullText - O texto completo a ser enviado.
  */
 async function sendMultiPartMessage(to, fullText) {
     if (!fullText) return;
@@ -30,8 +28,6 @@ async function sendMultiPartMessage(to, fullText) {
 
 /**
  * Processa as mensagens agrupadas após a "Pausa para Ouvir" (debounce).
- * Esta função agora lida com a resposta em objeto do getLlmReply para atualizar o estado.
- * @param {string} from - O número do remetente.
  */
 async function processBufferedMessages(from) {
     const session = await sessionManager.getSession(from);
@@ -49,17 +45,17 @@ async function processBufferedMessages(from) {
     
     const llmResult = await getLlmReply(session, fullMessage);
     
-    // <<< 2. INÍCIO DA MODIFICAÇÃO: Salvar a resposta do bot (outbound) >>>
-    // Fazemos isso aqui, logo após receber a resposta da IA.
+    // Salva a resposta do bot (outbound)
     if (session.clinicConfig && session.clinicConfig.id && llmResult.reply) {
-        await saveMessage({
+        const messageToSave = {
             content: llmResult.reply,
             direction: 'outbound',
             patient_phone: from,
             clinic_id: session.clinicConfig.id
-        });
+        };
+        console.log('[Webhook] TENTANDO SALVAR mensagem OUTBOUND:', messageToSave); // LOG DE DEPURAÇÃO
+        await saveMessage(messageToSave);
     }
-    // <<< FIM DA MODIFICAÇÃO >>>
 
     if (llmResult.newState && llmResult.newState !== session.state) {
         session.state = llmResult.newState;
@@ -77,9 +73,6 @@ async function processBufferedMessages(from) {
 
 /**
  * Ponto de entrada principal para todas as mensagens recebidas do WhatsApp.
- * Orquestra o fluxo usando a Máquina de Estados Finita (FSM).
- * @param {object} req - O objeto de requisição do Express.
- * @param {object} res - O objeto de resposta do Express.
  */
 async function processIncomingMessage(req, res) {
     try {
@@ -104,17 +97,17 @@ async function processIncomingMessage(req, res) {
 
         const session = await sessionManager.getSession(from);
 
-        // <<< 3. INÍCIO DA MODIFICAÇÃO: Salvar a mensagem do paciente (inbound) >>>
-        // Fazemos isso aqui, logo no início, para registrar tudo que chega.
+        // Salva a mensagem do paciente (inbound)
         if (session.clinicConfig && session.clinicConfig.id) {
-            await saveMessage({
+            const messageToSave = {
                 content: text,
                 direction: 'inbound',
                 patient_phone: from,
                 clinic_id: session.clinicConfig.id
-            });
+            };
+            console.log('[Webhook] TENTANDO SALVAR mensagem INBOUND:', messageToSave); // LOG DE DEPURAÇÃO
+            await saveMessage(messageToSave);
         }
-        // <<< FIM DA MODIFICAÇÃO >>>
 
         if (isEmergency(text)) {
             console.log(`🚨 [Guardrail] Emergência detectada para ${from}.`);
@@ -138,9 +131,15 @@ async function processIncomingMessage(req, res) {
             const objectionResponse = detetarObjeção(text, session.firstName);
             if (objectionResponse) {
                 console.log(`💡 [Guardrail] Objeção pós-fechamento detectada.`);
-                // Salva a resposta da objeção também!
                 if (session.clinicConfig && session.clinicConfig.id) {
-                    await saveMessage({ content: objectionResponse, direction: 'outbound', patient_phone: from, clinic_id: session.clinicConfig.id });
+                    const messageToSave = { 
+                        content: objectionResponse, 
+                        direction: 'outbound', 
+                        patient_phone: from, 
+                        clinic_id: session.clinicConfig.id 
+                    };
+                    console.log('[Webhook] TENTANDO SALVAR mensagem de OBJEÇÃO:', messageToSave); // LOG DE DEPURAÇÃO
+                    await saveMessage(messageToSave);
                 }
                 await simulateTypingDelay(objectionResponse);
                 await whatsappService.sendMessage(from, objectionResponse);
