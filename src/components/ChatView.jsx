@@ -4,7 +4,6 @@ import './ChatView.css'; // O CSS que estiliza as bolhas de mensagem
 
 /**
  * Sub-componente para renderizar uma única bolha de mensagem.
- * A estrutura com message-content e message-meta ajuda na estilização.
  */
 const ChatMessage = ({ message }) => (
     <div className={`message-row ${message.direction}`}>
@@ -25,9 +24,6 @@ const ChatMessage = ({ message }) => (
 
 /**
  * Componente principal que exibe a conversa completa de um paciente.
- * @param {object} props - As propriedades recebidas do componente pai (App.jsx).
- * @param {string} props.patientPhone - O número de telefone da conversa a ser exibida.
- * @param {string} props.clinicId - O ID da clínica para filtrar as mensagens.
  */
 const ChatView = ({ patientPhone, clinicId }) => {
     const [messages, setMessages] = useState([]);
@@ -40,7 +36,6 @@ const ChatView = ({ patientPhone, clinicId }) => {
     }, [messages]);
 
     // Efeito principal para buscar dados e escutar em tempo real.
-    // Ele roda sempre que o patientPhone ou o clinicId mudar.
     useEffect(() => {
         if (!patientPhone || !clinicId) return;
 
@@ -80,13 +75,12 @@ const ChatView = ({ patientPhone, clinicId }) => {
             )
             .subscribe();
 
-        // 3. Função de limpeza: se desinscreve do canal quando o componente é desmontado
-        // ou quando o usuário seleciona outra conversa.
+        // 3. Função de limpeza.
         return () => {
             supabase.removeChannel(channel);
         };
 
-    }, [patientPhone, clinicId]); // Array de dependências
+    }, [patientPhone, clinicId]);
 
     if (loading) {
         return <div>Carregando histórico de mensagens...</div>;
@@ -98,13 +92,10 @@ const ChatView = ({ patientPhone, clinicId }) => {
                 {messages.map(msg => (
                     <ChatMessage key={msg.id} message={msg} />
                 ))}
-                <div ref={messagesEndRef} /> {/* Âncora para o scroll automático */}
+                <div ref={messagesEndRef} />
             </div>
         </div>
     );
-};
-
-export default ChatView;
 };
 
 export default ChatView;
