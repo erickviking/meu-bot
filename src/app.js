@@ -1,43 +1,44 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const crypto = require('crypto');
-const config = require('./config');
-const allRoutes = require('./routes');
+import React, { useState } from 'react';
+import ConversationList from './components/ConversationList';
+import ChatView from './components/ChatView';
+import './App.css';
 
-const app = express();
+function App() {
+    // Estado para guardar qual paciente está selecionado na lista
+    const [selectedPatient, setSelectedPatient] = useState(null);
 
-// Middleware para verificar a assinatura da Meta.
-// A opção 'verify' do bodyParser nos dá o raw body da requisição,
-// que é necessário para calcular o hash HMAC.
-const verifyRequestSignature = (req, res, buf, encoding) => {
-    // A verificação só se aplica à rota do webhook.
-    if (req.originalUrl === '/webhook') {
-        const signature = req.headers['x-hub-signature-256'];
+    // O ID da clínica do administrador logado (por enquanto, fixo)
+    const clinicIdForDemo = 'dd6a92e1-6ab5-4411-b752-d7f55151f293'; // Use o ID da sua clínica
 
-        if (!signature) {
-            throw new Error('Assinatura de segurança (x-hub-signature-256) ausente.');
-        }
+    const handleSelectConversation = (patientPhone) => {
+        setSelectedPatient(patientPhone);
+    };
 
-        const signatureHash = signature.split('=')[1];
-        const expectedHash = crypto
-            .createHmac('sha256', config.whatsapp.appSecret)
-            .update(buf)
-            .digest('hex');
-
-        if (signatureHash !== expectedHash) {
-            throw new Error('Assinatura do webhook inválida. A requisição pode ser fraudulenta.');
-        }
-    }
-};
-
-try {
-    app.use(bodyParser.json({ verify: verifyRequestSignature }));
-} catch (error) {
-    console.error('Falha ao aplicar middleware de segurança:', error);
+    return (
+        <div className="App">
+            <div className="crm-layout">
+                <div className="sidebar">
+                    <ConversationList 
+                        clinicId={clinicIdForDemo}
+                        onSelectConversation={handleSelectConversation}
+                        selectedPatientPhone={selectedPatient}
+                    />
+                </div>
+                <div className="main-content">
+                    {selectedPatient ? (
+                        <ChatView 
+                            patientPhone={selectedPatient} 
+                            clinicId={clinicIdForDemo} 
+                        />
+                    ) : (
+                        <div className="placeholder">
+                            <h2>Selecione uma conversa para começar</h2>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
 }
 
-
-// Rota principal da aplicação
-app.use('/', allRoutes);
-
-module.exports = app;
+export default App;
