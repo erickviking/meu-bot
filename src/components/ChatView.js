@@ -1,33 +1,50 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { supabase } from '../supabaseClient'; // Importa o cliente Supabase
-import './ChatView.css';
+import { supabase } from '../supabaseClient';
+import './ChatView.css'; // O CSS que estiliza as bolhas de mensagem
 
-// Componente para uma única bolha de mensagem (nenhuma alteração aqui)
+/**
+ * Sub-componente para renderizar uma única bolha de mensagem.
+ * A estrutura com message-content e message-meta ajuda na estilização.
+ */
 const ChatMessage = ({ message }) => (
     <div className={`message-row ${message.direction}`}>
         <div className="message-bubble">
-            <p>{message.content}</p>
-            <span className="message-time">
-                {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
+            <div className="message-content">
+                <span>{message.content}</span>
+            </div>
+            <div className="message-meta">
+                <span className="message-time">
+                    {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                {/* No futuro, aqui podem entrar os ícones de status ✓✓ */}
+            </div>
         </div>
     </div>
 );
 
 
+/**
+ * Componente principal que exibe a conversa completa de um paciente.
+ * @param {object} props - As propriedades recebidas do componente pai (App.jsx).
+ * @param {string} props.patientPhone - O número de telefone da conversa a ser exibida.
+ * @param {string} props.clinicId - O ID da clínica para filtrar as mensagens.
+ */
 const ChatView = ({ patientPhone, clinicId }) => {
     const [messages, setMessages] = useState([]);
     const [loading, setLoading] = useState(true);
-    const messagesEndRef = useRef(null);
+    const messagesEndRef = useRef(null); // Referência para o final da lista de mensagens
 
-    // Efeito para rolar para a última mensagem
+    // Efeito para rolar a tela para a última mensagem sempre que a lista for atualizada.
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    // Efeito para buscar o histórico e se inscrever nos ANÚNCIOS
+    // Efeito principal para buscar dados e escutar em tempo real.
+    // Ele roda sempre que o patientPhone ou o clinicId mudar.
     useEffect(() => {
-        // 1. Busca o histórico inicial de mensagens (sem alterações aqui)
+        if (!patientPhone || !clinicId) return;
+
+        // 1. Busca o histórico inicial de mensagens da conversa selecionada.
         const fetchMessages = async () => {
             setLoading(true);
             const { data, error } = await supabase
@@ -47,43 +64,29 @@ const ChatView = ({ patientPhone, clinicId }) => {
 
         fetchMessages();
 
-        // --- INÍCIO DA MODIFICAÇÃO (Plano B) ---
-        
-        // 2. Se inscreve para receber os ANÚNCIOS enviados pelo backend
-        const CHANNEL_NAME = 'realtime-chat'; // O nome DEVE ser o mesmo do backend
+        // 2. Se inscreve para receber novas mensagens (anúncios do backend) em tempo real.
         const channel = supabase
-            .channel(CHANNEL_NAME)
+            .channel('realtime-chat')
             .on(
-                'broadcast', // <<< MUDANÇA PRINCIPAL: Ouvimos 'broadcast'
-                { 
-                    event: 'new_message' // <<< E filtramos pelo nome do nosso evento
-                }, 
+                'broadcast',
+                { event: 'new_message' },
                 (response) => {
-                    // A nova mensagem vem dentro do 'payload' do anúncio
                     const newMessage = response.payload;
-                    console.log('Nova mensagem recebida via broadcast!', newMessage);
-
-                    // Como todos os painéis ouvem o mesmo canal, precisamos garantir
-                    // que esta mensagem pertence à conversa que está aberta na tela.
+                    // Garante que a nova mensagem pertence a esta conversa aberta.
                     if (newMessage.patient_phone === patientPhone) {
                         setMessages(currentMessages => [...currentMessages, newMessage]);
                     }
                 }
             )
             .subscribe();
-        
-        console.log(`✅ Escutando broadcasts no canal: ${CHANNEL_NAME}`);
 
-        // --- FIM DA MODIFICAÇÃO ---
-
-
-        // 3. Função de limpeza (sem alterações aqui)
+        // 3. Função de limpeza: se desinscreve do canal quando o componente é desmontado
+        // ou quando o usuário seleciona outra conversa.
         return () => {
-            console.log(`🔌 Desconectando do canal ${CHANNEL_NAME}`);
             supabase.removeChannel(channel);
         };
 
-    }, [patientPhone, clinicId]);
+    }, [patientPhone, clinicId]); // Array de dependências
 
     if (loading) {
         return <div>Carregando histórico de mensagens...</div>;
@@ -95,10 +98,13 @@ const ChatView = ({ patientPhone, clinicId }) => {
                 {messages.map(msg => (
                     <ChatMessage key={msg.id} message={msg} />
                 ))}
-                <div ref={messagesEndRef} />
+                <div ref={messagesEndRef} /> {/* Âncora para o scroll automático */}
             </div>
         </div>
     );
+};
+
+export default ChatView;
 };
 
 export default ChatView;
