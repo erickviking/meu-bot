@@ -1,58 +1,102 @@
-/* src/components/ConversationList.css */
-.conversation-list {
+/* Estilização principal para a área do chat */
+.chat-container {
     display: flex;
     flex-direction: column;
-    height: 100%;
-    background-color: #fff;
-    border-right: 1px solid #e0e0e0;
+    height: 100%; /* Ocupa toda a altura do container pai (.main-content) */
+    width: 100%;
+    background-color: #e5ddd5;
+    background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png');
 }
-.list-header {
-    padding: 16px;
-    border-bottom: 1px solid #e0e0e0;
-}
-.list-header h2 {
-    margin: 0;
-    font-size: 1.2rem;
-}
-.list-body {
+
+/* A área onde as mensagens aparecem */
+.chat-messages {
+    flex-grow: 1;
     overflow-y: auto;
-    flex-grow: 1;
-}
-.conversation-item {
-    display: flex;
-    padding: 12px 16px;
-    cursor: pointer;
-    border-bottom: 1px solid #f0f0f0;
-    transition: background-color 0.2s;
-}
-.conversation-item:hover {
-    background-color: #f5f5f5;
-}
-.conversation-item.selected {
-    background-color: #e6f7ff;
-}
-.convo-info {
-    flex-grow: 1;
-    overflow: hidden;
-}
-.convo-phone {
-    font-weight: 600;
-}
-.convo-preview {
-    margin: 4px 0 0;
-    font-size: 0.9rem;
-    color: #666;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.convo-time {
-    font-size: 0.75rem;
-    color: #999;
-    margin-left: 10px;
-}
-.conversation-list-loading {
     padding: 20px;
-    text-align: center;
-    color: #888;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Cada linha de mensagem (para alinhamento) */
+.message-row {
+    display: flex;
+    margin-bottom: 4px;
+    max-width: 80%;
+}
+
+/* Alinha as mensagens do paciente à esquerda */
+.message-row.inbound {
+    align-self: flex-start;
+}
+
+/* Alinha as mensagens do bot à direita */
+.message-row.outbound {
+    align-self: flex-end;
+}
+
+/* A bolha da mensagem em si */
+.message-bubble {
+    padding: 8px 12px;
+    border-radius: 8px;
+    position: relative;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
+    display: flex;
+    flex-wrap: wrap; /* Permite que o horário quebre a linha se necessário */
+    align-items: flex-end; /* Alinha o horário na parte de baixo */
+}
+
+/* Cor da bolha do paciente */
+.message-row.inbound .message-bubble {
+    background-color: #ffffff;
+    border-top-left-radius: 0;
+}
+
+/* Cor da bolha do bot */
+.message-row.outbound .message-bubble {
+    background-color: #dcf8c6;
+    border-top-right-radius: 0;
+}
+
+/* O conteúdo de texto da mensagem */
+.message-content {
+    padding-right: 10px; /* Espaço para o horário não sobrepor o texto */
+    word-wrap: break-word; /* Garante que textos longos quebrem a linha */
+    color: #333;
+}
+
+/* Container para o horário e futuros ícones de status */
+.message-meta {
+    margin-left: auto; /* Empurra o horário para a direita */
+    white-space: nowrap; /* Impede que o horário quebre a linha */
+}
+
+/* Estilo do texto do horário */
+.message-time {
+    font-size: 0.7rem;
+    color: #999;
+}
+
+.message-row.outbound .message-time {
+    color: #61934a; /* Cor mais escura para o fundo verde */
+}
+
+/* A "cauda" da bolha de mensagem, criada com um pseudo-elemento */
+.message-bubble::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    width: 20px;
+    height: 20px;
+}
+
+/* Cauda para as mensagens da esquerda (inbound) */
+.message-row.inbound .message-bubble::before {
+    left: -10px;
+    background-image: url('data:image/svg+xml;charset=UTF-8,<svg width="20" height="20" xmlns="http://www.w3.org/2000/svg"><path d="M 10 0 C 10 10 5 10 0 20 L 20 0 Z" fill="white"/></svg>');
+}
+
+/* Cauda para as mensagens da direita (outbound) */
+.message-row.outbound .message-bubble::before {
+    right: -10px;
+    background-image: url('data:image/svg+xml;charset=UTF-8,<svg width="20" height="20" xmlns="http://www.w3.org/2000/svg"><path d="M 10 0 C 10 10 15 10 20 20 L 0 0 Z" fill="%23dcf8c6"/></svg>');
 }
