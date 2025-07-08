@@ -15,18 +15,21 @@ async function getClinicConfigByWhatsappId(whatsappPhoneId) {
     try {
         const { data, error } = await supabase
             .from('clinics')
-            .select('doctor_name, secretary_name, knowledge_base')
+            // <<< 1. CORREÇÃO AQUI: Adicionamos 'id' à lista de colunas selecionadas.
+            .select('id, doctor_name, secretary_name, knowledge_base')
             .eq('whatsapp_phone_id', whatsappPhoneId)
-            .single(); // .single() espera um único resultado ou retorna erro.
+            .single();
 
         if (error) {
             console.error(`🚨 Erro ao buscar clínica para o ID ${whatsappPhoneId}:`, error.message);
             return null;
         }
 
-        // Renomeia os campos para o formato esperado pelo resto da aplicação, se necessário
         if (data) {
+            // Renomeia os campos e inclui o ID no objeto retornado.
             return {
+                // <<< 2. CORREÇÃO AQUI: Incluímos o 'id' no objeto de retorno.
+                id: data.id, 
                 doctorName: data.doctor_name,
                 secretaryName: data.secretary_name,
                 knowledgeBase: data.knowledge_base
