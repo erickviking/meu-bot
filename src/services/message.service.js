@@ -1,50 +1,52 @@
 const supabase = require('./supabase.client');
 
-// Um nome único para o canal de comunicação em tempo real.
 const CHANNEL_NAME = 'realtime-chat';
 
-/**
- * Salva uma mensagem no banco de dados e anuncia no canal de broadcast.
- * @param {object} messageData - Os dados da mensagem a serem salvos.
- * @param {string} messageData.content - O texto da mensagem.
- * @param {string} messageData.direction - A direção ('inbound' ou 'outbound').
- * @param {string} messageData.patient_phone - O telefone do paciente.
- * @param {string} messageData.clinic_id - O ID da clínica (UUID).
- */
 async function saveMessage(messageData) {
-    // Validação para não tentar salvar se não houver um ID de clínica.
+    // LOG 1: Confirma que a função foi chamada e com quais dados.
+    console.log('[MessageService] Função saveMessage iniciada com os dados:', messageData);
+
     if (!messageData.clinic_id) {
-        console.error('❌ Tentativa de salvar mensagem sem clinic_id. Abortado.');
+        console.error('[MessageService] ERRO: clinic_id está faltando. Abortando save.');
+        return;
+    }
+    if (!messageData.content || messageData.content.trim() === '') {
+        console.warn('[MessageService] AVISO: Conteúdo da mensagem está vazio. Abortando save.');
         return;
     }
 
     try {
-        // Salva a mensagem e usa .select().single() para obter o registro salvo.
+        // LOG 2: Confirma que estamos prestes a executar a inserção.
+        console.log('[MessageService] Executando Supabase insert...');
         const { data: newMessage, error } = await supabase
             .from('messages')
             .insert(messageData)
             .select()
             .single();
 
+        // LOG 3: Se houver um erro do Supabase, loga o objeto de erro completo.
         if (error) {
-            console.error('❌ Erro ao salvar mensagem no banco:', error.message);
+            console.error('❌ [MessageService] ERRO DO SUPABASE:', JSON.stringify(error, null, 2));
             return;
         }
 
-        // Se a mensagem foi salva com sucesso (newMessage não é nulo),
-        // anuncie-a no canal de broadcast.
+        // LOG 4: Se a inserção for bem-sucedida, loga os dados retornados.
+        console.log('✅ [MessageService] Mensagem salva com sucesso. Resposta do DB:', newMessage);
+
         if (newMessage) {
+            console.log('[MessageService] Anunciando mensagem no canal de broadcast...');
             const channel = supabase.channel(CHANNEL_NAME);
             await channel.send({
                 type: 'broadcast',
-                event: 'new_message',    // Nome do nosso evento customizado
-                payload: newMessage,     // Enviamos a mensagem completa
+                event: 'new_message',
+                payload: newMessage,
             });
-            console.log(`[Broadcast] Mensagem da direção '${newMessage.direction}' anunciada.`);
+            console.log('📢 [MessageService] Mensagem anunciada com sucesso.');
         }
 
     } catch (err) {
-        console.error('❌ Erro fatal no message.service:', err);
+        // LOG 5: Se ocorrer um erro inesperado no bloco try/catch.
+        console.error('❌ [MessageService] ERRO FATAL NO TRY/CATCH:', JSON.stringify(err, null, 2));
     }
 }
 
