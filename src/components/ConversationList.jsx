@@ -1,18 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import './ConversationList.css'; // Criaremos este CSS a seguir
+import './ConversationList.css';
 
 const ConversationList = ({ clinicId, onSelectConversation, selectedPatientPhone }) => {
     const [conversations, setConversations] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [filterStatus, setFilterStatus] = useState('all');
 
     useEffect(() => {
-        // Função para buscar a última mensagem de cada conversa única
         const fetchConversations = async () => {
             if (!clinicId) return;
             setLoading(true);
 
-            // Esta é a consulta SQL que usa a lógica DISTINCT ON
             const { data, error } = await supabase.rpc('get_latest_messages_per_patient', {
                 target_clinic_id: clinicId
             });
@@ -20,14 +19,17 @@ const ConversationList = ({ clinicId, onSelectConversation, selectedPatientPhone
             if (error) {
                 console.error("Erro ao buscar lista de conversas:", error);
             } else {
-                setConversations(data);
+                const filtered = filterStatus === 'all'
+                    ? data
+                    : data.filter(c => c.status === filterStatus);
+                setConversations(filtered);
             }
+
             setLoading(false);
         };
 
         fetchConversations();
 
-        // Também escutamos por novas mensagens para atualizar a lista
         const channel = supabase
             .channel('public:messages')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, fetchConversations)
@@ -37,7 +39,19 @@ const ConversationList = ({ clinicId, onSelectConversation, selectedPatientPhone
             supabase.removeChannel(channel);
         };
 
-    }, [clinicId]);
+    }, [clinicId, filterStatus]);
+
+    const getStatusIcon = (status) => {
+        switch (status) {
+            case 'agendado':
+                return '✅';
+            case 'perdido':
+                return '❌';
+            case 'lead':
+            default:
+                return '🟡';
+        }
+    };
 
     if (loading) return <div className="conversation-list-loading">Carregando conversas...</div>;
 
@@ -45,7 +59,18 @@ const ConversationList = ({ clinicId, onSelectConversation, selectedPatientPhone
         <div className="conversation-list">
             <div className="list-header">
                 <h2>Conversas</h2>
+                <select
+                    className="status-filter"
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                >
+                    <option value="all">Todas</option>
+                    <option value="lead">🟡 Leads</option>
+                    <option value="agendado">✅ Agendados</option>
+                    <option value="perdido">❌ Perdidos</option>
+                </select>
             </div>
+
             <div className="list-body">
                 {conversations.map(convo => (
                     <div
@@ -54,7 +79,12 @@ const ConversationList = ({ clinicId, onSelectConversation, selectedPatientPhone
                         onClick={() => onSelectConversation(convo.patient_phone)}
                     >
                         <div className="convo-info">
-                            <span className="convo-phone">{convo.patient_phone}</span>
+                            <div className="convo-header">
+                                <span className="convo-phone">{convo.patient_phone}</span>
+                                <span className="status-badge">
+                                    {getStatusIcon(convo.status)} {convo.status?.toUpperCase()}
+                                </span>
+                            </div>
                             <p className="convo-preview">{convo.content}</p>
                         </div>
                         <span className="convo-time">
