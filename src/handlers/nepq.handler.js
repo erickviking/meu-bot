@@ -75,7 +75,7 @@ async function handleInitialMessage(session, message, clinicConfig) {
 
     if (currentState === 'start') {
         session.onboardingState = 'awaiting_name';
-        return `Olá! Bem-vindo(a) ao consultório do ${doctorName}. Sou a secretária virtual, ${secretaryName}. Com quem eu tenho o prazer de falar? 😊`;
+        return `Olá! Bem-vindo ao consultório do ${doctorName}. Sou a secretária, ${secretaryName}. Com quem eu tenho o prazer de falar?`;
     }
 
     if (currentState === 'awaiting_name') {
@@ -84,7 +84,10 @@ async function handleInitialMessage(session, message, clinicConfig) {
         const nameExtractionResponse = await openai.chat.completions.create({
             model: 'gpt-4o',
             messages: [
-                { role: 'system', content: "Você é um especialista em extrair nomes de pessoas de frases em português. Responda APENAS com o primeiro nome da pessoa. Se nenhum nome for encontrado, ou se a frase for um cumprimento simples, responda com a palavra 'NULL'." },
+                { 
+                    role: 'system', 
+                    content: "Você é um especialista em extrair nomes de pessoas de frases em português. A frase a seguir é de um usuário se apresentando. Sua tarefa é extrair o nome DO USUÁRIO que está falando. O usuário pode dizer 'meu nome é...', 'eu sou o...', 'aqui é o...'. Ignore outros nomes que possam aparecer (como o nome do atendente). Responda APENAS com o primeiro nome do usuário. Se nenhum nome de usuário for encontrado, responda com a palavra 'NULL'."
+                },
                 { role: 'user', content: message }
             ],
             temperature: 0,
