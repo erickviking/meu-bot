@@ -1,22 +1,26 @@
 // src/handlers/nepq.handler.js
 const config = require('../config');
 const { OpenAI } = require('openai');
-const { formatAsName } = require('../utils/helpers');
+// A função 'formatAsName' não é mais necessária para extrair o nome.
+// const { formatAsName } = require('../utils/helpers'); 
 const { buildPromptForClinic } = require('../services/promptBuilder');
 
 // Inicializa o cliente da OpenAI com a chave de API.
 const openai = new OpenAI({ apiKey: config.openai.apiKey });
 
 /**
- * Função principal que se comunica com a LLM e gerencia a lógica da conversa.
- * Agora, ela também detecta a transição de estado para o fechamento.
- * @param {object} session - O objeto de sessão completo do usuário, incluindo a 'clinicConfig'.
+ * Função principal que se comunica com a LLM.
+ * AGORA ELA PASSA A SESSÃO COMPLETA PARA O PROMPT BUILDER.
+ * @param {object} session - O objeto de sessão completo do usuário.
  * @param {string} latestMessage - A última mensagem enviada pelo usuário.
  * @returns {Promise<object>} Um objeto contendo a resposta da IA e o novo estado da conversa.
  */
 async function getLlmReply(session, latestMessage) {
     try {
-        const systemPrompt = buildPromptForClinic(session.clinicConfig);
+        // --- INÍCIO DA CORREÇÃO ---
+        // Agora passamos a sessão inteira para que o prompt seja sensível ao estado.
+        const systemPrompt = buildPromptForClinic(session.clinicConfig, session);
+        // --- FIM DA CORREÇÃO ---
 
         const messages = [
             { role: 'system', content: systemPrompt },
@@ -41,11 +45,11 @@ async function getLlmReply(session, latestMessage) {
         }
 
         const isClosingStatement = 
-            botReply.includes("Por isso o atendimento é particular.") &&
-            botReply.includes("investigação profunda para encontrar a \"causa raiz\"");
+            botReply.includes("Por isso o atendimento é particular.") ||
+            botReply.includes("O valor da consulta é");
 
-        if (isClosingStatement) {
-            console.log(`[FSM] Fechamento detectado na resposta da IA. Mudando estado para 'closing_delivered'.`);
+        if (isClosingStatement && session.state === 'nepq_discovery') {
+            console.log(`[FSM] Fechamento detectado. Mudando estado para 'closing_delivered'.`);
             return { reply: botReply, newState: 'closing_delivered' };
         }
 
@@ -61,13 +65,10 @@ async function getLlmReply(session, latestMessage) {
 }
 
 /**
- * Gerencia a fase inicial de onboarding para obter o nome do usuário.
- * @param {object} session - O objeto de sessão do usuário.
- * @param {string} message - A mensagem do usuário.
- * @param {object} clinicConfig - A configuração da clínica.
- * @returns {string | null} A resposta do bot ou null se o onboarding estiver completo.
+ * REESCRITA: Gerencia a fase de onboarding usando IA para extrair o nome.
+ * @returns {Promise<string | null>} A resposta do bot ou null se o onboarding estiver completo.
  */
-function handleInitialMessage(session, message, clinicConfig) {
+async function handleInitialMessage(session, message, clinicConfig) {
     const currentState = session.onboardingState;
     const doctorName = clinicConfig.doctorName || 'nosso especialista';
     const secretaryName = clinicConfig.secretaryName || 'a secretária virtual';
@@ -78,21 +79,33 @@ function handleInitialMessage(session, message, clinicConfig) {
     }
 
     if (currentState === 'awaiting_name') {
-        const potentialName = formatAsName(message);
-        const invalidNames = ['oi', 'ola', 'bom', 'boa', 'tarde', 'noite', 'dia'];
+        console.log(`[IA Onboarding] Tentando extrair nome da frase: "${message}"`);
         
-        if (!potentialName || invalidNames.includes(potentialName.toLowerCase())) {
-            return `Desculpe, não consegui identificar seu nome. Por favor, me diga apenas como devo te chamar.`;
+        const nameExtractionResponse = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            messages: [
+                { role: 'system', content: "Você é um especialista em extrair nomes de pessoas de frases em português. Responda APENAS com o primeiro nome da pessoa. Se nenhum nome for encontrado, ou se a frase for um cumprimento simples, responda com a palavra 'NULL'." },
+                { role: 'user', content: message }
+            ],
+            temperature: 0,
+            max_tokens: 10,
+        });
+
+        const potentialName = nameExtractionResponse.choices[0].message.content.trim();
+
+        if (!potentialName || potentialName.toUpperCase() === 'NULL' || potentialName.length < 2) {
+            return `Desculpe, não consegui identificar seu nome. Por favor, poderia me dizer apenas como devo te chamar?`;
         }
         
-        session.firstName = potentialName;
+        const formattedName = potentialName.charAt(0).toUpperCase() + potentialName.slice(1).toLowerCase();
+        session.firstName = formattedName;
         session.onboardingState = 'complete';
         session.state = 'nepq_discovery';
 
-        const welcomeMessage = `Perfeito, ${potentialName}! É um prazer falar com você. 😊 Para eu te ajudar da melhor forma, pode me contar o que te motivou a procurar o ${doctorName} hoje?`;
+        const welcomeMessage = `Perfeito, ${formattedName}! É um prazer falar com você. 😊 Para eu te ajudar da melhor forma, pode me contar o que te motivou a procurar o ${doctorName} hoje?`;
 
         session.conversationHistory = [];
-        session.conversationHistory.push({ role: 'user', content: `Meu nome é ${potentialName}.` });
+        session.conversationHistory.push({ role: 'user', content: `O paciente disse que seu nome é ${formattedName}.` });
         session.conversationHistory.push({ role: 'assistant', content: welcomeMessage });
         
         return welcomeMessage;
