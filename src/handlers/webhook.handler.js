@@ -10,6 +10,8 @@ const { saveMessage } = require('../services/message.service');
 const { createClient } = require('@supabase/supabase-js');
 const axios = require('axios');
 
+// A inicialização do cliente Supabase aqui pode ser redundante se você já tem um cliente singleton.
+// Recomendo usar o cliente exportado de 'src/services/supabase.client.js' para consistência.
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY);
 const debounceTimers = new Map();
 
@@ -50,15 +52,13 @@ async function processBufferedMessages(from) {
   console.log(`[Debounce] Processando mensagem agrupada de ${from}: "${fullMessage}"`);
   session.messageBuffer = [];
   const llmResult = await getLlmReply(session, fullMessage);
-  if (session.clinicConfig && session.clinicConfig.id && llmResult.reply) {
-    const messageToSave = {
+  if (session.clinicConfig?.id && llmResult.reply) {
+    await saveMessage({
       content: llmResult.reply,
       direction: 'outbound',
       patient_phone: from,
       clinic_id: session.clinicConfig.id
-    };
-    console.log('[Webhook] TENTANDO SALVAR mensagem OUTBOUND:', messageToSave);
-    await saveMessage(messageToSave);
+    });
   }
   if (llmResult.newState && llmResult.newState !== session.state) {
     session.state = llmResult.newState;
@@ -105,31 +105,45 @@ async function processIncomingMessage(req, res) {
 
     const session = await sessionManager.getSession(from);
 
-    if (session.clinicConfig && session.clinicConfig.id) {
-      const messageToSave = {
+    if (session.clinicConfig?.id) {
+      await saveMessage({
         content: text,
         direction: 'inbound',
         patient_phone: from,
         clinic_id: session.clinicConfig.id
-      };
-      console.log('[Webhook] TENTANDO SALVAR mensagem INBOUND:', messageToSave);
-      await saveMessage(messageToSave);
+      });
     }
 
     if (isEmergency(text)) {
       console.log(`🚨 [Guardrail] Emergência detectada para ${from}.`);
       const emergencyResponse = getEmergencyResponse(session.firstName);
       await whatsappService.sendMessage(from, emergencyResponse);
+      // Opcional: Salvar a resposta de emergência no banco de dados
+      // await saveMessage({ content: emergencyResponse, direction: 'outbound', ... });
       return;
     }
 
+    // --- BLOCO DE ONBOARDING CORRIGIDO ---
     if (session.onboardingState !== 'complete') {
       const onboardingResponse = handleInitialMessage(session, text, session.clinicConfig);
       if (onboardingResponse) {
         await sessionManager.saveSession(from, session);
         await simulateTypingDelay(onboardingResponse);
         await whatsappService.sendMessage(from, onboardingResponse);
-        return;
+
+        // --- INÍCIO DA CORREÇÃO ---
+        // Garante que a resposta de onboarding enviada também seja salva no banco de dados.
+        if (session.clinicConfig?.id) {
+            await saveMessage({
+                content: onboardingResponse,
+                direction: 'outbound',
+                patient_phone: from,
+                clinic_id: session.clinicConfig.id
+            });
+        }
+        // --- FIM DA CORREÇÃO ---
+        
+        return; // Encerra a execução após lidar com o onboarding.
       }
     }
 
@@ -138,15 +152,13 @@ async function processIncomingMessage(req, res) {
       const objectionResponse = detetarObjeção(text, session.firstName);
       if (objectionResponse) {
         console.log(`💡 [Guardrail] Objeção pós-fechamento detectada.`);
-        if (session.clinicConfig && session.clinicConfig.id) {
-          const messageToSave = {
+        if (session.clinicConfig?.id) {
+          await saveMessage({
             content: objectionResponse,
             direction: 'outbound',
             patient_phone: from,
             clinic_id: session.clinicConfig.id
-          };
-          console.log('[Webhook] TENTANDO SALVAR mensagem de OBJEÇÃO:', messageToSave);
-          await saveMessage(messageToSave);
+          });
         }
         await simulateTypingDelay(objectionResponse);
         await whatsappService.sendMessage(from, objectionResponse);
