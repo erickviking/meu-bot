@@ -10,7 +10,7 @@ const { saveMessage } = require('../services/message.service');
 const { createClient } = require('@supabase/supabase-js');
 const axios = require('axios');
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY);
 const debounceTimers = new Map();
 
 async function getProfilePicture(phoneNumberId, accessToken) {
