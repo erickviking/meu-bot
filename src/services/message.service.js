@@ -1,13 +1,15 @@
+// File: src/services/message.service.js (Versão Corrigida)
+
 const supabase = require('./supabase.client');
 
-const CHANNEL_NAME = 'realtime-chat';
+// O nome do canal base, que será combinado com o ID do paciente.
+const BASE_CHANNEL_NAME = 'realtime-chat';
 
 async function saveMessage(messageData) {
-    // LOG 1: Confirma que a função foi chamada e com quais dados.
-    console.log('[MessageService] Função saveMessage iniciada com os dados:', messageData);
+    console.log('[MessageService] Função saveMessage iniciada:', messageData);
 
-    if (!messageData.clinic_id) {
-        console.error('[MessageService] ERRO: clinic_id está faltando. Abortando save.');
+    if (!messageData.clinic_id || !messageData.patient_phone) {
+        console.error('[MessageService] ERRO: clinic_id e patient_phone são obrigatórios. Abortando.');
         return;
     }
     if (!messageData.content || messageData.content.trim() === '') {
@@ -16,26 +18,29 @@ async function saveMessage(messageData) {
     }
 
     try {
-        // LOG 2: Confirma que estamos prestes a executar a inserção.
-        console.log('[MessageService] Executando Supabase insert...');
         const { data: newMessage, error } = await supabase
             .from('messages')
             .insert(messageData)
             .select()
             .single();
 
-        // LOG 3: Se houver um erro do Supabase, loga o objeto de erro completo.
         if (error) {
-            console.error('❌ [MessageService] ERRO DO SUPABASE:', JSON.stringify(error, null, 2));
+            console.error('❌ [MessageService] ERRO DO SUPABASE ao salvar:', JSON.stringify(error, null, 2));
             return;
         }
 
-        // LOG 4: Se a inserção for bem-sucedida, loga os dados retornados.
-        console.log('✅ [MessageService] Mensagem salva com sucesso. Resposta do DB:', newMessage);
+        console.log('✅ [MessageService] Mensagem salva com sucesso:', newMessage);
 
         if (newMessage) {
-            console.log('[MessageService] Anunciando mensagem no canal de broadcast...');
-            const channel = supabase.channel(CHANNEL_NAME);
+            // --- INÍCIO DA CORREÇÃO ---
+            // Criamos um nome de canal dinâmico, específico para o paciente.
+            // Ex: 'realtime-chat:551151995795'
+            const channelName = `${BASE_CHANNEL_NAME}:${newMessage.patient_phone}`;
+            console.log(`[MessageService] Anunciando mensagem no canal dinâmico: "${channelName}"`);
+            
+            const channel = supabase.channel(channelName);
+            // --- FIM DA CORREÇÃO ---
+
             await channel.send({
                 type: 'broadcast',
                 event: 'new_message',
@@ -45,7 +50,6 @@ async function saveMessage(messageData) {
         }
 
     } catch (err) {
-        // LOG 5: Se ocorrer um erro inesperado no bloco try/catch.
         console.error('❌ [MessageService] ERRO FATAL NO TRY/CATCH:', JSON.stringify(err, null, 2));
     }
 }
