@@ -125,7 +125,7 @@ async function processIncomingMessage(req, res) {
 
     // --- BLOCO DE ONBOARDING CORRIGIDO ---
     if (session.onboardingState !== 'complete') {
-      const onboardingResponse = handleInitialMessage(session, text, session.clinicConfig);
+      const onboardingResponse = await handleInitialMessage(session, text, session.clinicConfig);
       if (onboardingResponse) {
         await sessionManager.saveSession(from, session);
         await simulateTypingDelay(onboardingResponse);
