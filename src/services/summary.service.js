@@ -91,10 +91,10 @@ ${conversationText}
         console.log(`[SummaryService] Resumo para ${patientPhone} salvo com sucesso.`);
         return savedSummary;
 
-    } catch (error) {
-        console.error(`❌ Erro no fluxo de geração de resumo para ${patientPhone}:`, error.message);
-        return null;
-    }
+catch (error) {
+  console.error("Erro interno ao gerar resumo:", error); // log completo
+  return { error: error.message || "Erro desconhecido." }; // retorna mensagem real
+}
 }
 
 module.exports = { generateAndSaveSummary };
