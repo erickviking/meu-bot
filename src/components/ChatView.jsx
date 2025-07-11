@@ -155,25 +155,42 @@ const ChatView = ({ patientPhone, clinicId }) => {
   };
   
   const handleGenerateSummary = async () => {
-    setIsSummaryLoading(true);
-    try {
-        const response = await fetch(`/api/v1/conversations/${patientPhone}/summarize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ clinicId: clinicId }),
-        });
+  if (!patientPhone || !clinicId) {
+    alert("Não é possível gerar resumo sem uma conversa ativa.");
+    return;
+  }
+  setIsSummaryLoading(true);
+  try {
+    // Pega a URL base do backend a partir da variável de ambiente.
+    const apiUrl = import.meta.env.VITE_BACKEND_API_URL;
 
-        const newSummaryData = await response.json();
-        if (!response.ok) throw new Error(newSummaryData.error || 'Falha na API.');
-        
-        setSummary(newSummaryData.summary);
+    // Constrói a URL completa para a chamada da API no Render.
+    const response = await fetch(`${apiUrl}/api/v1/conversations/${patientPhone}/summarize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clinicId }),
+    });
+
+    const text = await response.text();
+    let newSummaryData = {};
+    try {
+      newSummaryData = text ? JSON.parse(text) : {};
     } catch (err) {
-        console.error("Erro ao gerar resumo:", err);
-        alert(`Erro: ${err.message}`);
-    } finally {
-        setIsSummaryLoading(false);
+      console.error("Erro ao fazer parse do JSON:", err, "Conteúdo recebido:", text);
+      throw new Error("Resposta inválida do servidor.");
     }
-  };
+
+    if (!response.ok) {
+      throw new Error(newSummaryData.error || 'Falha na API ao gerar resumo.');
+    }
+    setSummary(newSummaryData.summary);
+  } catch (err) {
+    console.error("Erro ao acionar a geração do resumo:", err);
+    alert(`Erro: ${err.message}`);
+  } finally {
+    setIsSummaryLoading(false);
+  }
+};
 
   // --- RENDERIZAÇÃO DO COMPONENTE ---
 
