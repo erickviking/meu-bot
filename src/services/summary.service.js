@@ -95,7 +95,7 @@ ${conversationText}
     }
 
     console.log(`[SummaryService] Resumo salvo com sucesso para ${patientPhone}.`);
-    return savedSummary;
+return { summary: summaryText };
 
   } catch (error) {
     console.error("❌ Erro interno ao gerar resumo:", error);
