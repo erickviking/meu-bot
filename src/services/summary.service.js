@@ -17,7 +17,7 @@ async function generateAndSaveSummary(patientPhone, clinicId) {
     console.log(`[SummaryService] Iniciando resumo para ${patientPhone} na clínica ${clinicId}.`);
 
     try {
-        // ETAPA 1: Buscar a base de conhecimento específica da clínica.
+        // ETAPA 1: Buscar a base de conhecimento
         const { data: clinicData, error: clinicError } = await supabase
             .from('clinics')
             .select('knowledge_base')
@@ -25,12 +25,14 @@ async function generateAndSaveSummary(patientPhone, clinicId) {
             .single();
 
         if (clinicError) {
-            throw new Error(`Falha ao buscar knowledge_base para a clínica ${clinicId}: ${clinicError.message}`);
+            throw new Error(`Falha ao buscar knowledge_base: ${clinicError.message}`);
         }
 
-        const knowledgeBaseContext = clinicData.knowledge_base ? JSON.stringify(clinicData.knowledge_base, null, 2) : 'Nenhuma informação específica fornecida.';
+        const knowledgeBaseContext = clinicData.knowledge_base
+            ? JSON.stringify(clinicData.knowledge_base, null, 2)
+            : 'Nenhuma informação específica fornecida.';
 
-        // ETAPA 2: Buscar o histórico de mensagens.
+        // ETAPA 2: Buscar mensagens
         const { data: messages, error: msgError } = await supabase
             .from('messages')
             .select('content, direction')
@@ -40,15 +42,15 @@ async function generateAndSaveSummary(patientPhone, clinicId) {
             .limit(30);
 
         if (msgError || !messages || messages.length === 0) {
-            console.error(`[SummaryService] Nenhuma mensagem encontrada para ${patientPhone}. Não há o que resumir.`);
+            console.error(`[SummaryService] Nenhuma mensagem encontrada para ${patientPhone}.`);
             return null;
         }
 
         const conversationText = messages
             .map(m => `${m.direction === 'inbound' ? 'Paciente' : 'Secretária'}: ${m.content}`)
             .join('\n');
-        
-        // ETAPA 3: Montar o prompt, agora incluindo a base de conhecimento.
+
+        // ETAPA 3: Criar prompt
         const summaryPrompt = `
 CONTEXTO DA CLÍNICA (use estas informações como sua base da verdade):
 ${knowledgeBaseContext}
@@ -63,7 +65,7 @@ Histórico da Conversa:
 ${conversationText}
         `;
 
-        // ETAPA 4: Chamar a OpenAI.
+        // ETAPA 4: OpenAI
         const response = await openai.chat.completions.create({
             model: 'gpt-4o',
             messages: [{ role: 'system', content: summaryPrompt }],
@@ -73,8 +75,7 @@ ${conversationText}
 
         const summaryText = response.choices[0].message.content.trim();
 
-        // ETAPA 5: Salvar o resumo no banco de dados.
-        console.log(`[SummaryService] Salvando resumo no Supabase...`);
+        // ETAPA 5: Salvar no Supabase
         const { data: savedSummary, error: summaryError } = await supabase
             .from('conversation_summaries')
             .upsert(
@@ -85,16 +86,14 @@ ${conversationText}
             .single();
 
         if (summaryError) {
-            throw new Error(`Erro ao salvar resumo no DB: ${summaryError.message}`);
+            throw new Error(`Erro ao salvar resumo: ${summaryError.message}`);
         }
 
-        console.log(`[SummaryService] Resumo para ${patientPhone} salvo com sucesso.`);
+        console.log(`[SummaryService] Resumo salvo com sucesso.`);
         return savedSummary;
 
-catch (error) {
-  console.error("Erro interno ao gerar resumo:", error); // log completo
-  return { error: error.message || "Erro desconhecido." }; // retorna mensagem real
+    } catch (error) {
+        console.error("Erro interno ao gerar resumo:", error);
+        return { error: error.message || "Erro desconhecido." };
+    }
 }
-}
-
-module.exports = { generateAndSaveSummary };
