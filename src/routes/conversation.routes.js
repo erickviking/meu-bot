@@ -23,22 +23,20 @@ router.post('/:phone/summarize', async (req, res) => {
 
         const summaryData = await generateAndSaveSummary(phone, clinicId);
 
-        if (!summaryData) {
-            return res.status(500).json({ error: 'Falha ao gerar o resumo no serviço.' });
+        if (!summaryData || summaryData.error) {
+            return res.status(500).json({ 
+                error: summaryData?.error || 'Falha ao gerar o resumo no serviço.'
+            });
         }
-        
-        res.status(201).json(summaryData);
+
+        // Garante estrutura compatível com frontend
+        return res.status(200).json({ summary: summaryData.summary });
 
     } catch (error) {
-        // --- INÍCIO DA CORREÇÃO ---
-        console.error('❌ Erro fatal no endpoint de resumo:', error.message);
-        // Garantimos que a resposta de erro também seja em JSON.
-        res.status(500).json({ 
+        console.error('❌ Erro fatal no endpoint de resumo:', error);
+        return res.status(500).json({ 
             error: 'Erro interno do servidor ao gerar resumo.',
-            details: error.message 
+            details: error.message
         });
-        // --- FIM DA CORREÇÃO ---
     }
 });
-
-module.exports = router;
