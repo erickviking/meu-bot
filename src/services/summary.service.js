@@ -103,5 +103,6 @@ ${conversationText}
   }
 }
 
-// ✅ Exportação correta
+console.log("✅ Função generateAndSaveSummary definida:", typeof generateAndSaveSummary);
+
 module.exports = { generateAndSaveSummary };
