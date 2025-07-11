@@ -11,47 +11,47 @@ const openai = new OpenAI({ apiKey: config.openai.apiKey });
  * Gera um resumo da conversa, USANDO A BASE DE CONHECIMENTO DA CLÍNICA.
  * @param {string} patientPhone - O número de telefone do paciente.
  * @param {string} clinicId - O UUID da clínica.
- * @returns {Promise<object|null>} O objeto do resumo salvo ou null em caso de erro.
+ * @returns {Promise<object>} O objeto do resumo salvo ou um objeto com { error } em caso de falha.
  */
 async function generateAndSaveSummary(patientPhone, clinicId) {
-    console.log(`[SummaryService] Iniciando resumo para ${patientPhone} na clínica ${clinicId}.`);
+  console.log(`[SummaryService] Iniciando resumo para ${patientPhone} na clínica ${clinicId}.`);
 
-    try {
-        // ETAPA 1: Buscar a base de conhecimento
-        const { data: clinicData, error: clinicError } = await supabase
-            .from('clinics')
-            .select('knowledge_base')
-            .eq('id', clinicId)
-            .single();
+  try {
+    // ETAPA 1: Buscar a base de conhecimento
+    const { data: clinicData, error: clinicError } = await supabase
+      .from('clinics')
+      .select('knowledge_base')
+      .eq('id', clinicId)
+      .single();
 
-        if (clinicError) {
-            throw new Error(`Falha ao buscar knowledge_base: ${clinicError.message}`);
-        }
+    if (clinicError) {
+      throw new Error(`Falha ao buscar knowledge_base: ${clinicError.message}`);
+    }
 
-        const knowledgeBaseContext = clinicData.knowledge_base
-            ? JSON.stringify(clinicData.knowledge_base, null, 2)
-            : 'Nenhuma informação específica fornecida.';
+    const knowledgeBaseContext = clinicData.knowledge_base
+      ? JSON.stringify(clinicData.knowledge_base, null, 2)
+      : 'Nenhuma informação específica fornecida.';
 
-        // ETAPA 2: Buscar mensagens
-        const { data: messages, error: msgError } = await supabase
-            .from('messages')
-            .select('content, direction')
-            .eq('patient_phone', patientPhone)
-            .eq('clinic_id', clinicId)
-            .order('created_at', { ascending: true })
-            .limit(30);
+    // ETAPA 2: Buscar mensagens
+    const { data: messages, error: msgError } = await supabase
+      .from('messages')
+      .select('content, direction')
+      .eq('patient_phone', patientPhone)
+      .eq('clinic_id', clinicId)
+      .order('created_at', { ascending: true })
+      .limit(30);
 
-        if (msgError || !messages || messages.length === 0) {
-            console.error(`[SummaryService] Nenhuma mensagem encontrada para ${patientPhone}.`);
-            return null;
-        }
+    if (msgError || !messages || messages.length === 0) {
+      console.warn(`[SummaryService] Nenhuma mensagem encontrada para ${patientPhone}.`);
+      return { error: 'Sem mensagens para gerar resumo.' };
+    }
 
-        const conversationText = messages
-            .map(m => `${m.direction === 'inbound' ? 'Paciente' : 'Secretária'}: ${m.content}`)
-            .join('\n');
+    const conversationText = messages
+      .map(m => `${m.direction === 'inbound' ? 'Paciente' : 'Secretária'}: ${m.content}`)
+      .join('\n');
 
-        // ETAPA 3: Criar prompt
-        const summaryPrompt = `
+    // ETAPA 3: Criar prompt
+    const summaryPrompt = `
 CONTEXTO DA CLÍNICA (use estas informações como sua base da verdade):
 ${knowledgeBaseContext}
 ---
@@ -63,37 +63,45 @@ Com base no contexto da clínica acima e no histórico da conversa a seguir, voc
 
 Histórico da Conversa:
 ${conversationText}
-        `;
+    `;
 
-        // ETAPA 4: OpenAI
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
-            messages: [{ role: 'system', content: summaryPrompt }],
-            temperature: 0.2,
-            max_tokens: 250,
-        });
+    // ETAPA 4: Chamada à OpenAI
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'system', content: summaryPrompt }],
+      temperature: 0.2,
+      max_tokens: 250,
+    });
 
-        const summaryText = response.choices[0].message.content.trim();
+    const summaryText = response.choices[0].message.content.trim();
 
-        // ETAPA 5: Salvar no Supabase
-        const { data: savedSummary, error: summaryError } = await supabase
-            .from('conversation_summaries')
-            .upsert(
-                { phone: patientPhone, clinic_id: clinicId, summary: summaryText, updated_at: new Date() },
-                { onConflict: 'phone,clinic_id' }
-            )
-            .select()
-            .single();
+    // ETAPA 5: Salvar no Supabase
+    const { data: savedSummary, error: summaryError } = await supabase
+      .from('conversation_summaries')
+      .upsert(
+        {
+          phone: patientPhone,
+          clinic_id: clinicId,
+          summary: summaryText,
+          updated_at: new Date(),
+        },
+        { onConflict: 'phone,clinic_id' }
+      )
+      .select()
+      .single();
 
-        if (summaryError) {
-            throw new Error(`Erro ao salvar resumo: ${summaryError.message}`);
-        }
-
-        console.log(`[SummaryService] Resumo salvo com sucesso.`);
-        return savedSummary;
-
-    } catch (error) {
-        console.error("Erro interno ao gerar resumo:", error);
-        return { error: error.message || "Erro desconhecido." };
+    if (summaryError) {
+      throw new Error(`Erro ao salvar resumo: ${summaryError.message}`);
     }
+
+    console.log(`[SummaryService] Resumo salvo com sucesso para ${patientPhone}.`);
+    return savedSummary;
+
+  } catch (error) {
+    console.error("❌ Erro interno ao gerar resumo:", error);
+    return { error: error.message || "Erro desconhecido." };
+  }
 }
+
+// ✅ Exportação correta
+module.exports = { generateAndSaveSummary };
