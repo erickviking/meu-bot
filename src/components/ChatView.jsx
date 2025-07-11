@@ -146,24 +146,35 @@ const ChatView = ({ patientPhone, clinicId }) => {
     await supabase.from('patients').update({ status: newStatus }).eq('phone', patientPhone);
   };
   
-  const handleGenerateSummary = async () => {
-    setIsSummaryLoading(true);
-    try {
-        const response = await fetch(`/api/v1/conversations/${patientPhone}/summarize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ clinicId: clinicId }),
-        });
-        const newSummaryData = await response.json();
-        if (!response.ok) throw new Error(newSummaryData.error || 'Falha na API.');
-        setSummary(newSummaryData.summary);
-    } catch (err) {
-        console.error("Erro ao gerar resumo:", err);
-        alert(`Erro: ${err.message}`);
-    } finally {
-        setIsSummaryLoading(false);
+const handleGenerateSummary = async () => {
+  if (!patientPhone || !clinicId) {
+    alert("Não é possível gerar resumo sem uma conversa ativa.");
+    return;
+  }
+  setIsSummaryLoading(true);
+  try {
+    // Pega a URL do backend da variável de ambiente
+    const apiUrl = import.meta.env.VITE_BACKEND_API_URL;
+
+    // Constrói a URL completa para a chamada da API
+    const response = await fetch(`${apiUrl}/api/v1/conversations/${patientPhone}/summarize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clinicId }),
+    });
+
+    const newSummaryData = await response.json();
+    if (!response.ok) {
+      throw new Error(newSummaryData.error || 'Falha na API ao gerar resumo.');
     }
-  };
+    setSummary(newSummaryData.summary);
+  } catch (err) {
+    console.error("Erro ao acionar a geração do resumo:", err);
+    alert(`Erro: ${err.message}`);
+  } finally {
+    setIsSummaryLoading(false);
+  }
+};
 
   // --- RENDERIZAÇÃO DO COMPONENTE ---
 
