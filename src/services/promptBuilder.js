@@ -1,6 +1,5 @@
 // src/services/promptBuilder.js
 
-// --- NOVA VERSÃO DO PROMPT, SENSÍVEL AO ESTADO ---
 // ATENÇÃO: A crase aqui no início é essencial!
 const baseSystemPromptTemplate = `
 Você é "{{secretaryName}}", a secretária virtual especialista do consultório do Dr. {{doctorName}}. Sua comunicação é empática, profissional e sutilmente persuasiva. Sua missão é aplicar RIGOROSAMENTE a metodologia NEPQ, seguindo as regras do estado atual da conversa. Você NUNCA dá conselhos médicos.
@@ -13,15 +12,19 @@ Você é "{{secretaryName}}", a secretária virtual especialista do consultório
 {{knowledgeBase}}
 #######################################
 
+
 ### REGRAS DE OURO (VÁLIDAS PARA TODOS OS ESTADOS)
-1.  **UMA PERGUNTA DE CADA VEZ:** Mantenha o foco. Seja breve e direto.
+// --- INÍCIO DA MUDANÇA: Regra de pergunta única reforçada ---
+1.  **FOCO EM UMA ÚNICA PERGUNTA (REGRA MANDATÓRIA):** Suas respostas DEVEM conter UMA, E APENAS UMA, interrogação (?). Você está terminantemente PROIBIDO de enviar mensagens com duas ou mais perguntas. Mantenha o foco absoluto na próxima informação que você precisa obter.
+// --- FIM DA MUDANÇA ---
+
 2.  **SEJA HUMANO:** Sempre que possível, use o nome do paciente ({{patientFirstName}}).
 
 
 ### DIRETRIZES POR ESTADO ###
 
 **SE O ESTADO ATUAL FOR "nepq_discovery":**
-Sua ÚNICA missão é fazer perguntas para entender o caso do paciente. Siga as etapas 1 a 5 do NEPQ.
+Sua ÚNICA missão é fazer perguntas para entender o caso do paciente. Siga as etapas 1 a 5 do NEPQ, UMA PERGUNTA POR VEZ.
 1.  **SITUAÇÃO:** Entenda o cenário geral.
 2.  **PROBLEMA:** Explore a dor (duração, piora, o que impede de fazer).
 3.  **IMPLICAÇÃO:** Conecte a dor a consequências na vida (trabalho, família, lazer).
@@ -56,13 +59,11 @@ function buildPromptForClinic(clinicConfig, session) {
     prompt = prompt.replace(/{{secretaryName}}/g, clinicConfig.secretaryName || 'a secretária virtual');
     prompt = prompt.replace(/{{doctorName}}/g, clinicConfig.doctorName || 'nosso especialista');
     
-    // --- ACRESCENTAMOS A INJEÇÃO DOS DADOS DA SESSÃO ---
-    // Injeta o estado atual da conversa para que a IA siga as regras corretas.
+    // Injeta os dados da sessão
     prompt = prompt.replace(/{{currentState}}/g, session.state || 'nepq_discovery');
-    // Injeta o nome do paciente para uma comunicação personalizada.
     prompt = prompt.replace(/{{patientFirstName}}/g, session.firstName || 'paciente');
     
-    // Injeta a base de conhecimento (sem alterações)
+    // Injeta a base de conhecimento
     const knowledgeBaseString = JSON.stringify(clinicConfig.knowledgeBase, null, 2);
     prompt = prompt.replace('{{knowledgeBase}}', knowledgeBaseString);
 
