@@ -8,12 +8,6 @@ const conversationRoutes = require('./conversation.routes');
 // Inicializa o roteador principal do Express
 const router = express.Router();
 
-// --- ROTA DE TESTE PARA ESTE ARQUIVO ---
-router.get('/health-index', (req, res) => {
-    res.status(200).json({ status: 'ok', message: 'Roteador principal (index.js) está funcionando.' });
-});
-// --- FIM DO TESTE ---
-
 /**
  * @path /
  * @description Rota raiz que lida com os webhooks da API do WhatsApp.
