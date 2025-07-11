@@ -166,7 +166,7 @@ const ChatView = ({ patientPhone, clinicId }) => {
     const apiUrl = import.meta.env.VITE_BACKEND_API_URL;
 
     if (!apiUrl) {
-      throw new Error("Variável de ambiente VITE_BACKEND_API_URL não definida.");
+      throw new Error("A URL do backend não está configurada (VITE_BACKEND_API_URL).");
     }
 
     const response = await fetch(`${apiUrl}/api/v1/conversations/${patientPhone}/summarize`, {
@@ -178,13 +178,12 @@ const ChatView = ({ patientPhone, clinicId }) => {
       body: JSON.stringify({ clinicId }),
     });
 
-    const responseText = await response.text();
-
-    let parsed;
+    let parsed = {};
     try {
-      parsed = responseText ? JSON.parse(responseText) : {};
+      parsed = await response.json(); // Faz parse direto e seguro
     } catch (jsonErr) {
-      console.error("❌ Erro ao converter resposta da API em JSON:", jsonErr, "Texto recebido:", responseText);
+      const raw = await response.text();
+      console.error("❌ Erro ao converter resposta da API em JSON:", jsonErr, "Texto recebido:", raw);
       throw new Error("A resposta da API não está em formato JSON.");
     }
 
@@ -193,7 +192,7 @@ const ChatView = ({ patientPhone, clinicId }) => {
     }
 
     if (!parsed.summary) {
-      throw new Error("Resumo não encontrado na resposta.");
+      throw new Error("Resumo não encontrado na resposta da API.");
     }
 
     setSummary(parsed.summary);
