@@ -8,7 +8,7 @@ const supabase = require('./supabase.client');
 const openai = new OpenAI({ apiKey: config.openai.apiKey });
 
 /**
- * Gera um resumo da conversa, AGORA USANDO A BASE DE CONHECIMENTO DA CLÍNICA.
+ * Gera um resumo da conversa, USANDO A BASE DE CONHECIMENTO DA CLÍNICA.
  * @param {string} patientPhone - O número de telefone do paciente.
  * @param {string} clinicId - O UUID da clínica.
  * @returns {Promise<object|null>} O objeto do resumo salvo ou null em caso de erro.
@@ -25,7 +25,6 @@ async function generateAndSaveSummary(patientPhone, clinicId) {
             .single();
 
         if (clinicError) {
-            // Se não encontrarmos a clínica, não podemos prosseguir de forma segura.
             throw new Error(`Falha ao buscar knowledge_base para a clínica ${clinicId}: ${clinicError.message}`);
         }
 
@@ -51,17 +50,17 @@ async function generateAndSaveSummary(patientPhone, clinicId) {
         
         // ETAPA 3: Montar o prompt, agora incluindo a base de conhecimento.
         const summaryPrompt = `
-            CONTEXTO DA CLÍNICA (use estas informações como sua base da verdade):
-            ${knowledgeBaseContext}
-            ---
-            
-            Com base no contexto da clínica acima e no histórico da conversa a seguir, você é uma secretária médica. Sua tarefa é gerar um resumo objetivo em texto corrido (máximo de 5 linhas). Destaque:
-            - Nome e queixa principal do paciente.
-            - Se deseja marcar consulta e qual especialidade.
-            - Dúvidas, objeções ou próximos passos.
+CONTEXTO DA CLÍNICA (use estas informações como sua base da verdade):
+${knowledgeBaseContext}
+---
 
-            Histórico da Conversa:
-            ${conversationText}
+Com base no contexto da clínica acima e no histórico da conversa a seguir, você é uma secretária médica. Sua tarefa é gerar um resumo objetivo em texto corrido (máximo de 5 linhas). Destaque:
+- Nome e queixa principal do paciente.
+- Se deseja marcar consulta e qual especialidade.
+- Dúvidas, objeções ou próximos passos.
+
+Histórico da Conversa:
+${conversationText}
         `;
 
         // ETAPA 4: Chamar a OpenAI.
@@ -93,9 +92,8 @@ async function generateAndSaveSummary(patientPhone, clinicId) {
         return savedSummary;
 
     } catch (error) {
-        // Um único local para capturar todos os erros do fluxo.
         console.error(`❌ Erro no fluxo de geração de resumo para ${patientPhone}:`, error.message);
-        return null; // Retorna nulo para indicar falha ao chamador.
+        return null;
     }
 }
 
