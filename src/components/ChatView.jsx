@@ -1,9 +1,9 @@
 // File: src/components/ChatView.jsx
-// Description: Versão final, completa e otimizada do componente de visualização de chat.
+// Description: Versão final e otimizada do componente, incorporando Skeleton Loader e busca de dados paralela.
 
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
-import ChatViewSkeleton from './ChatViewSkeleton'; // Lembre-se de que este arquivo precisa existir
+import ChatViewSkeleton from './ChatViewSkeleton';
 import './ChatView.css';
 
 // --- SUB-COMPONENTES INTERNOS PARA MANTER O JSX LIMPO ---
@@ -42,7 +42,8 @@ const SummarySidebar = ({ summary, isLoading, onGenerate }) => (
     </div>
 );
 
-// --- COMPONENTE PRINCIPAL ---
+
+// --- COMPONENTE PRINCIPAL OTIMIZADO ---
 
 const ChatView = ({ patientPhone, clinicId }) => {
   // --- ESTADOS DO COMPONENTE ---
@@ -77,18 +78,21 @@ const ChatView = ({ patientPhone, clinicId }) => {
 
     const fetchAllData = async () => {
         try {
+            // As 3 buscas são disparadas em paralelo para economizar tempo
             const [messagesPromise, patientPromise, summaryPromise] = [
                 supabase.from('messages').select('*').eq('patient_phone', patientPhone).eq('clinic_id', clinicId).order('created_at', { ascending: true }),
                 supabase.from('patients').select('name, status').eq('phone', patientPhone).single(),
                 supabase.from('conversation_summaries').select('summary').eq('phone', patientPhone).eq('clinic_id', clinicId).single()
             ];
             
+            // Aguarda a finalização de todas as buscas
             const [{ data: messagesData, error: messagesError }, { data: patientData, error: patientError }, { data: summaryData, error: summaryError }] = await Promise.all([messagesPromise, patientPromise, summaryPromise]);
 
+            // Processa os resultados, tratando possíveis erros de cada busca
             if (messagesError) throw messagesError;
             setMessages(messagesData || []);
             
-            if (patientError && patientError.code !== 'PGRST116') throw patientError;
+            if (patientError && patientError.code !== 'PGRST116') throw patientError; // PGRST116 = "0 linhas encontradas", o que é ok.
             setPatientName(patientData?.name || patientPhone);
             setStatus(patientData?.status || 'lead');
 
@@ -97,6 +101,7 @@ const ChatView = ({ patientPhone, clinicId }) => {
 
         } catch (error) {
             console.error("❌ Erro ao buscar dados da conversa:", error.message);
+            // Zera os estados em caso de erro para não mostrar dados antigos
             setMessages([]);
             setPatientName(patientPhone);
             setSummary('');
@@ -108,14 +113,13 @@ const ChatView = ({ patientPhone, clinicId }) => {
 
     fetchAllData();
 
-    // Canal de Real-time dinâmico e corrigido
-    const channel = supabase.channel(`realtime-chat:${patientPhone}`)
-        .on('broadcast', { event: 'new_message' }, (response) => {
-            const newMessage = response.payload;
-            if (newMessage.patient_phone === patientPhone) {
-              setMessages((current) => [...current, newMessage]);
-            }
-          }).subscribe();
+    // Canal de Real-time para novas mensagens
+    const channel = supabase.channel(`realtime-chat:${patientPhone}`).on('broadcast', { event: 'new_message' }, (response) => {
+        const newMessage = response.payload;
+        if (newMessage.patient_phone === patientPhone) {
+          setMessages((current) => [...current, newMessage]);
+        }
+      }).subscribe();
 
     return () => supabase.removeChannel(channel);
   }, [patientPhone, clinicId]);
@@ -134,8 +138,12 @@ const ChatView = ({ patientPhone, clinicId }) => {
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
+
     await supabase.from('messages').insert({
-      content: inputValue.trim(), direction: 'outbound', patient_phone: patientPhone, clinic_id: clinicId,
+      content: inputValue.trim(),
+      direction: 'outbound',
+      patient_phone: patientPhone,
+      clinic_id: clinicId,
     });
     setInputValue('');
   };
@@ -146,43 +154,26 @@ const ChatView = ({ patientPhone, clinicId }) => {
     await supabase.from('patients').update({ status: newStatus }).eq('phone', patientPhone);
   };
   
-const handleGenerateSummary = async () => {
-  if (!patientPhone || !clinicId) {
-    alert("Não é possível gerar resumo sem uma conversa ativa.");
-    return;
-  }
-  setIsSummaryLoading(true);
-  try {
-    // Pega a URL base do backend a partir da variável de ambiente.
-    const apiUrl = import.meta.env.VITE_BACKEND_API_URL;
-
-    // Constrói a URL completa para a chamada da API no Render.
-    const response = await fetch(`${apiUrl}/api/v1/conversations/${patientPhone}/summarize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clinicId }),
-    });
-
-    const text = await response.text();
-    let newSummaryData = {};
+  const handleGenerateSummary = async () => {
+    setIsSummaryLoading(true);
     try {
-      newSummaryData = text ? JSON.parse(text) : {};
-    } catch (err) {
-      console.error("Erro ao fazer parse do JSON:", err, "Conteúdo recebido:", text);
-      throw new Error("Resposta inválida do servidor.");
-    }
+        const response = await fetch(`/api/v1/conversations/${patientPhone}/summarize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clinicId: clinicId }),
+        });
 
-    if (!response.ok) {
-      throw new Error(newSummaryData.error || 'Falha na API ao gerar resumo.');
+        const newSummaryData = await response.json();
+        if (!response.ok) throw new Error(newSummaryData.error || 'Falha na API.');
+        
+        setSummary(newSummaryData.summary);
+    } catch (err) {
+        console.error("Erro ao gerar resumo:", err);
+        alert(`Erro: ${err.message}`);
+    } finally {
+        setIsSummaryLoading(false);
     }
-    setSummary(newSummaryData.summary);
-  } catch (err) {
-    console.error("Erro ao acionar a geração do resumo:", err);
-    alert(`Erro: ${err.message}`);
-  } finally {
-    setIsSummaryLoading(false);
-  }
-};
+  };
 
   // --- RENDERIZAÇÃO DO COMPONENTE ---
 
@@ -202,10 +193,12 @@ const handleGenerateSummary = async () => {
             <option value="paciente">Paciente</option>
           </select>
         </div>
+
         <div className="chat-messages">
           {messages.map((msg) => <ChatMessage key={msg.id} message={msg} />)}
           <div ref={messagesEndRef} />
         </div>
+
         <div className="chat-input">
           <form onSubmit={handleSendMessage}>
             <textarea
@@ -220,6 +213,7 @@ const handleGenerateSummary = async () => {
           </form>
         </div>
       </div>
+
       <SummarySidebar 
         summary={summary}
         isLoading={isSummaryLoading}
