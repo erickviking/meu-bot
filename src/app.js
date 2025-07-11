@@ -3,16 +3,21 @@ const bodyParser = require('body-parser');
 const crypto = require('crypto');
 const config = require('./config');
 const allRoutes = require('./routes');
-const cors = require('cors'); // 1. IMPORTE O PACOTE CORS
+const cors = require('cors');
 
 const app = express();
 
-// --- INÍCIO DA MODIFICAÇÃO ---
-// 2. USE O MIDDLEWARE DO CORS
-// Esta linha deve vir antes das suas rotas. Ela adiciona os cabeçalhos
-// necessários para permitir que seu frontend em um domínio diferente
-// se comunique com este backend.
+// O middleware do CORS já está corretamente configurado.
 app.use(cors());
+
+
+// --- INÍCIO DA MODIFICAÇÃO: Rota de Teste de Saúde ---
+// Adicionamos esta rota simples para verificar se o servidor Express está respondendo.
+// Ela deve ser acessada via GET em https://seu-backend-url/health
+app.get('/health', (req, res) => {
+  console.log('✅ Rota de teste /health foi acessada com sucesso!');
+  res.status(200).json({ status: 'ok', message: 'Servidor está no ar.' });
+});
 // --- FIM DA MODIFICAÇÃO ---
 
 
@@ -23,7 +28,7 @@ const verifyRequestSignature = (req, res, buf) => {
 
         if (!signature) {
             console.warn('⚠️ Assinatura de segurança (x-hub-signature-256) ausente.');
-            return; // Continua o processo sem validação se não houver assinatura
+            return;
         }
 
         const signatureHash = signature.split('=')[1];
@@ -38,8 +43,7 @@ const verifyRequestSignature = (req, res, buf) => {
     }
 };
 
-// Usamos o bodyParser com a função de verificação, envolto em um try/catch para robustez.
-// É importante que o body-parser venha depois do cors.
+// Usamos o bodyParser com a função de verificação.
 try {
     app.use(bodyParser.json({ verify: verifyRequestSignature }));
 } catch (error) {
