@@ -154,7 +154,7 @@ const ChatView = ({ patientPhone, clinicId }) => {
     await supabase.from('patients').update({ status: newStatus }).eq('phone', patientPhone);
   };
   
- const handleGenerateSummary = async () => {
+const handleGenerateSummary = async () => {
   if (!patientPhone || !clinicId) {
     alert("Não é possível gerar resumo sem uma conversa ativa.");
     return;
@@ -166,26 +166,25 @@ const ChatView = ({ patientPhone, clinicId }) => {
     const apiUrl = import.meta.env.VITE_BACKEND_API_URL;
 
     if (!apiUrl) {
-      throw new Error("A URL do backend não está configurada (VITE_BACKEND_API_URL).");
+      throw new Error("A URL do backend não está configurada.");
     }
 
     const response = await fetch(`${apiUrl}/api/v1/conversations/${patientPhone}/summarize`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json', // ✅ Evita erro 406
+        'Accept': 'application/json', // Evita erro 406
       },
       body: JSON.stringify({ clinicId }),
     });
 
-    let parsed = {};
-    try {
-      parsed = await response.json(); // Faz parse direto e seguro
-    } catch (jsonErr) {
-      const raw = await response.text();
-      console.error("❌ Erro ao converter resposta da API em JSON:", jsonErr, "Texto recebido:", raw);
-      throw new Error("A resposta da API não está em formato JSON.");
+    // 🔍 Verifica se a resposta tem conteúdo
+    const contentLength = response.headers.get('content-length');
+    if (!contentLength || parseInt(contentLength) === 0) {
+      throw new Error("A API retornou resposta vazia.");
     }
+
+    const parsed = await response.json();
 
     if (!response.ok) {
       throw new Error(parsed?.error || 'Erro desconhecido ao gerar o resumo.');
