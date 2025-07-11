@@ -154,43 +154,57 @@ const ChatView = ({ patientPhone, clinicId }) => {
     await supabase.from('patients').update({ status: newStatus }).eq('phone', patientPhone);
   };
   
-  const handleGenerateSummary = async () => {
+ const handleGenerateSummary = async () => {
   if (!patientPhone || !clinicId) {
     alert("Não é possível gerar resumo sem uma conversa ativa.");
     return;
   }
+
   setIsSummaryLoading(true);
+
   try {
-    // Pega a URL base do backend a partir da variável de ambiente.
     const apiUrl = import.meta.env.VITE_BACKEND_API_URL;
 
-    // Constrói a URL completa para a chamada da API no Render.
+    if (!apiUrl) {
+      throw new Error("Variável de ambiente VITE_BACKEND_API_URL não definida.");
+    }
+
     const response = await fetch(`${apiUrl}/api/v1/conversations/${patientPhone}/summarize`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json', // ✅ Evita erro 406
+      },
       body: JSON.stringify({ clinicId }),
     });
 
-    const text = await response.text();
-    let newSummaryData = {};
+    const responseText = await response.text();
+
+    let parsed;
     try {
-      newSummaryData = text ? JSON.parse(text) : {};
-    } catch (err) {
-      console.error("Erro ao fazer parse do JSON:", err, "Conteúdo recebido:", text);
-      throw new Error("Resposta inválida do servidor.");
+      parsed = responseText ? JSON.parse(responseText) : {};
+    } catch (jsonErr) {
+      console.error("❌ Erro ao converter resposta da API em JSON:", jsonErr, "Texto recebido:", responseText);
+      throw new Error("A resposta da API não está em formato JSON.");
     }
 
     if (!response.ok) {
-      throw new Error(newSummaryData.error || 'Falha na API ao gerar resumo.');
+      throw new Error(parsed?.error || 'Erro desconhecido ao gerar o resumo.');
     }
-    setSummary(newSummaryData.summary);
+
+    if (!parsed.summary) {
+      throw new Error("Resumo não encontrado na resposta.");
+    }
+
+    setSummary(parsed.summary);
   } catch (err) {
-    console.error("Erro ao acionar a geração do resumo:", err);
-    alert(`Erro: ${err.message}`);
+    console.error("❌ Erro ao acionar a geração do resumo:", err);
+    alert(`Erro ao gerar resumo: ${err.message}`);
   } finally {
     setIsSummaryLoading(false);
   }
 };
+
 
   // --- RENDERIZAÇÃO DO COMPONENTE ---
 
