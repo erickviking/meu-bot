@@ -205,7 +205,6 @@ const ChatView = ({ patientPhone, clinicId }) => {
   }
 };
 
-
   // --- RENDERIZAÇÃO DO COMPONENTE ---
 
   if (loading) {
