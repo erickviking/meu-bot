@@ -36,3 +36,6 @@ router.post('/:phone/summarize', async (req, res) => {
         });
     }
 });
+
+module.exports = router;
+
