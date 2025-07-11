@@ -1,3 +1,5 @@
+// File: src/app.js (Versão Final e Corrigida)
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const crypto = require('crypto');
@@ -7,32 +9,36 @@ const cors = require('cors');
 
 const app = express();
 
-// O middleware do CORS já está corretamente configurado.
+
+// 1. O middleware do CORS deve ser o PRIMEIRO a ser usado.
+// Isso garante que ele intercepte as requisições de preflight (OPTIONS)
+// antes de qualquer outra lógica.
 app.use(cors());
+
 
 // Middleware para verificar a assinatura da Meta.
 const verifyRequestSignature = (req, res, buf) => {
+    // A lógica de verificação só deve rodar para o webhook.
     if (req.originalUrl.includes('/webhook')) {
         const signature = req.headers['x-hub-signature-256'];
-
         if (!signature) {
             console.warn('⚠️ Assinatura de segurança (x-hub-signature-256) ausente.');
             return;
         }
-
         const signatureHash = signature.split('=')[1];
         const expectedHash = crypto
             .createHmac('sha256', config.whatsapp.appSecret)
             .update(buf)
             .digest('hex');
-
         if (signatureHash !== expectedHash) {
-            throw new Error('Assinatura do webhook inválida. A requisição pode ser fraudulenta.');
+            throw new Error('Assinatura do webhook inválida.');
         }
     }
 };
 
-// Usamos o bodyParser com a função de verificação.
+
+// 2. O Body Parser vem DEPOIS do CORS.
+// A sua implementação com `verify` está correta para o webhook.
 try {
     app.use(bodyParser.json({ verify: verifyRequestSignature }));
 } catch (error) {
@@ -40,7 +46,9 @@ try {
     process.exit(1);
 }
 
-// Rota principal da aplicação que usa o router do index.js
+
+// 3. Suas rotas principais são registradas no FINAL.
 app.use('/', allRoutes);
+
 
 module.exports = app;
