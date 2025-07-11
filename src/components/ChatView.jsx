@@ -153,17 +153,25 @@ const handleGenerateSummary = async () => {
   }
   setIsSummaryLoading(true);
   try {
-    // Pega a URL do backend da variável de ambiente
+    // Pega a URL base do backend a partir da variável de ambiente.
     const apiUrl = import.meta.env.VITE_BACKEND_API_URL;
 
-    // Constrói a URL completa para a chamada da API
+    // Constrói a URL completa para a chamada da API no Render.
     const response = await fetch(`${apiUrl}/api/v1/conversations/${patientPhone}/summarize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ clinicId }),
     });
 
-    const newSummaryData = await response.json();
+    const text = await response.text();
+    let newSummaryData = {};
+    try {
+      newSummaryData = text ? JSON.parse(text) : {};
+    } catch (err) {
+      console.error("Erro ao fazer parse do JSON:", err, "Conteúdo recebido:", text);
+      throw new Error("Resposta inválida do servidor.");
+    }
+
     if (!response.ok) {
       throw new Error(newSummaryData.error || 'Falha na API ao gerar resumo.');
     }
