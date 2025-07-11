@@ -1,17 +1,16 @@
-// File: src/routes/conversation.routes.js
+// File: src/routes/conversation.routes.js (Versão de Teste Simplificada)
 
 const express = require('express');
-const { generateAndSaveSummary } = require('../services/summary.service');
+// const { generateAndSaveSummary } = require('../services/summary.service'); // LINHA PROBLEMÁTICA COMENTADA
 
 const router = express.Router();
 
-// --- ROTA DE TESTE PARA ESTE ARQUIVO ---
+// Rota de teste que sabemos que funciona
 router.get('/health-conversations', (req, res) => {
-    res.status(200).json({ status: 'ok', message: 'Roteador de conversas está funcionando.' });
+    res.status(200).json({ status: 'ok', message: 'Roteador de CONVERSAS está funcionando.' });
 });
-// --- FIM DO TESTE ---
 
-// POST /api/v1/conversations/:phone/summarize
+/* ROTA DE RESUMO TEMPORARIAMENTE DESATIVADA
 router.post('/:phone/summarize', async (req, res) => {
     try {
         const { phone } = req.params;
@@ -21,7 +20,7 @@ router.post('/:phone/summarize', async (req, res) => {
             return res.status(400).json({ error: 'clinic_id é obrigatório.' });
         }
 
-        const summaryData = await generateAndSaveSummary(phone, clinicId);
+        // const summaryData = await generateAndSaveSummary(phone, clinicId); // LINHA PROBLEMÁTICA COMENTADA
 
         if (!summaryData) {
             return res.status(500).json({ error: 'Falha ao gerar o resumo no serviço.' });
@@ -30,15 +29,13 @@ router.post('/:phone/summarize', async (req, res) => {
         res.status(201).json(summaryData);
 
     } catch (error) {
-        // --- INÍCIO DA CORREÇÃO ---
         console.error('❌ Erro fatal no endpoint de resumo:', error.message);
-        // Garantimos que a resposta de erro também seja em JSON.
         res.status(500).json({ 
             error: 'Erro interno do servidor ao gerar resumo.',
             details: error.message 
         });
-        // --- FIM DA CORREÇÃO ---
     }
 });
+*/
 
 module.exports = router;
