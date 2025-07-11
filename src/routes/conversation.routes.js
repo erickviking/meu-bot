@@ -5,11 +5,7 @@ const { generateAndSaveSummary } = require('../services/summary.service');
 
 const router = express.Router();
 
-// --- ROTA DE TESTE PARA ESTE ARQUIVO ---
-router.get('/health-conversations', (req, res) => {
-    res.status(200).json({ status: 'ok', message: 'Roteador de conversas está funcionando.' });
-});
-// --- FIM DO TESTE ---
+console.log("🔍 Importação de summary.service:", require('../services/summary.service'));
 
 // POST /api/v1/conversations/:phone/summarize
 router.post('/:phone/summarize', async (req, res) => {
