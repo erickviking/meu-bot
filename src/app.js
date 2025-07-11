@@ -10,17 +10,6 @@ const app = express();
 // O middleware do CORS já está corretamente configurado.
 app.use(cors());
 
-
-// --- INÍCIO DA MODIFICAÇÃO: Rota de Teste de Saúde ---
-// Adicionamos esta rota simples para verificar se o servidor Express está respondendo.
-// Ela deve ser acessada via GET em https://seu-backend-url/health
-app.get('/health', (req, res) => {
-  console.log('✅ Rota de teste /health foi acessada com sucesso!');
-  res.status(200).json({ status: 'ok', message: 'Servidor está no ar.' });
-});
-// --- FIM DA MODIFICAÇÃO ---
-
-
 // Middleware para verificar a assinatura da Meta.
 const verifyRequestSignature = (req, res, buf) => {
     if (req.originalUrl.includes('/webhook')) {
