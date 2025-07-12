@@ -26,4 +26,30 @@ async function sendMessage(to, text) {
     }
 }
 
-module.exports = { sendMessage };
+
+async function downloadMedia(mediaId) {
+    try {
+        const infoRes = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`, {
+            headers: { 'Authorization': `Bearer ${config.whatsapp.token}` }
+        });
+        if (!infoRes.ok) {
+            console.error('❌ Falha ao obter URL do media:', await infoRes.text());
+            return null;
+        }
+        const info = await infoRes.json();
+        const mediaRes = await fetch(info.url, {
+            headers: { 'Authorization': `Bearer ${config.whatsapp.token}` }
+        });
+        if (!mediaRes.ok) {
+            console.error('❌ Falha ao baixar media:', await mediaRes.text());
+            return null;
+        }
+        const arrayBuffer = await mediaRes.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+    } catch (error) {
+        console.error('❌ Erro ao baixar media:', error.message);
+        return null;
+    }
+}
+
+module.exports = { sendMessage, downloadMedia };

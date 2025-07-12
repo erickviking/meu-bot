@@ -2,6 +2,7 @@
 const config = require('../config');
 const sessionManager = require('../services/sessionManager');
 const whatsappService = require('../services/whatsappService');
+const { transcribeAudio } = require('../services/transcription.service');
 const { getLlmReply, handleInitialMessage } = require('./nepq.handler');
 const { simulateTypingDelay } = require('../utils/helpers');
 const { isEmergency, getEmergencyResponse } = require('../utils/emergencyDetector');
@@ -81,12 +82,26 @@ async function processIncomingMessage(req, res) {
     const nameFromContact = contact?.profile?.name;
     const phoneNumberId = req.body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
 
-    if (!messageData || messageData.type !== 'text' || !messageData.text?.body) {
+    if (!messageData || (messageData.type !== 'text' && messageData.type !== 'audio')) {
       return res.sendStatus(200);
     }
 
     const from = messageData.from;
-    const text = messageData.text.body;
+    let text = '';
+
+    if (messageData.type === 'text') {
+      text = messageData.text?.body || '';
+    } else if (messageData.type === 'audio') {
+      const mediaId = messageData.audio?.id;
+      const audioBuffer = mediaId ? await whatsappService.downloadMedia(mediaId) : null;
+      if (audioBuffer) {
+        text = await transcribeAudio(audioBuffer);
+      }
+    }
+
+    if (!text) {
+      return res.sendStatus(200);
+    }
 
     res.sendStatus(200);
 
