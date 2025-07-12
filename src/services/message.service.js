@@ -1,4 +1,4 @@
-// File: src/services/message.service.js (Versão Corrigida)
+// File: src/services/message.service.js
 
 const supabase = require('./supabase.client');
 
@@ -32,14 +32,10 @@ async function saveMessage(messageData) {
         console.log('✅ [MessageService] Mensagem salva com sucesso:', newMessage);
 
         if (newMessage) {
-            // --- INÍCIO DA CORREÇÃO ---
-            // Criamos um nome de canal dinâmico, específico para o paciente.
-            // Ex: 'realtime-chat:551151995795'
             const channelName = `${BASE_CHANNEL_NAME}:${newMessage.patient_phone}`;
             console.log(`[MessageService] Anunciando mensagem no canal dinâmico: "${channelName}"`);
             
             const channel = supabase.channel(channelName);
-            // --- FIM DA CORREÇÃO ---
 
             await channel.send({
                 type: 'broadcast',
@@ -54,4 +50,37 @@ async function saveMessage(messageData) {
     }
 }
 
-module.exports = { saveMessage };
+
+// --- INÍCIO DA ADIÇÃO ---
+/**
+ * Limpa todo o histórico de um paciente (mensagens e resumos)
+ * chamando a função RPC no Supabase.
+ * @param {string} patientPhone - O telefone do paciente a ser limpo.
+ * @param {string} clinicId - O ID da clínica para garantir a segurança.
+ */
+async function clearConversationHistory(patientPhone, clinicId) {
+    console.log(`[Service] Solicitando limpeza de histórico para ${patientPhone}`);
+    try {
+        const { error } = await supabase.rpc('clear_conversation_history', {
+            p_patient_phone: patientPhone,
+            p_clinic_id: clinicId
+        });
+
+        if (error) {
+            throw error;
+        }
+
+        console.log(`[Service] Histórico para ${patientPhone} limpo com sucesso.`);
+        return true;
+
+    } catch (error) {
+        console.error(`❌ Erro ao limpar histórico para ${patientPhone}:`, error.message);
+        return false;
+    }
+}
+// --- FIM DA ADIÇÃO ---
+
+
+// --- ATUALIZAÇÃO DA EXPORTAÇÃO ---
+// Agora exportamos as duas funções.
+module.exports = { saveMessage, clearConversationHistory };
