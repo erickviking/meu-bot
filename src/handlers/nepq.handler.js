@@ -64,9 +64,14 @@ async function getLlmReply(session, latestMessage) {
     }
 }
 
+// File: src/handlers/nepq.handler.js
+
+// ... (outros imports e a função getLlmReply permanecem os mesmos) ...
+
 /**
- * REESCRITA: Gerencia a fase de onboarding usando IA para extrair o nome.
- * @returns {Promise<string | null>} A resposta do bot ou null se o onboarding estiver completo.
+ * VERSÃO FINAL E AVANÇADA: Gerencia o onboarding usando IA para extrair o nome
+ * com um processo de raciocínio e resposta em JSON.
+ * @returns {Promise<string | null>}
  */
 async function handleInitialMessage(session, message, clinicConfig) {
     const currentState = session.onboardingState;
@@ -75,46 +80,68 @@ async function handleInitialMessage(session, message, clinicConfig) {
 
     if (currentState === 'start') {
         session.onboardingState = 'awaiting_name';
-        return `Olá! Bem-vindo ao consultório do ${doctorName}. Sou a secretária, ${secretaryName}. Com quem eu tenho o prazer de falar?`;
+        return `Olá! Bem-vindo(a) ao consultório do Dr. ${doctorName}. Sou a secretária virtual, ${secretaryName}. Com quem eu tenho o prazer de falar? 😊`;
     }
 
     if (currentState === 'awaiting_name') {
         console.log(`[IA Onboarding] Tentando extrair nome da frase: "${message}"`);
         
-        const nameExtractionResponse = await openai.chat.completions.create({
+        // --- NOVO PROMPT ESTRUTURADO ---
+        const nameExtractionPrompt = `
+        Sua tarefa é analisar a frase de um usuário que está se apresentando para uma secretária chamada 'Ana' e extrair o primeiro nome do usuário.
+
+        Siga este processo de raciocínio:
+        1. Analise a frase: "${message}".
+        2. Identifique todos os nomes de pessoas na frase.
+        3. Determine qual nome pertence ao USUÁRIO que está falando, ignorando o nome da secretária ('Ana').
+        4. Se um nome de usuário for encontrado, coloque-o no campo 'extracted_name'.
+        5. Se nenhum nome de usuário for encontrado, ou se for apenas um cumprimento, o valor de 'extracted_name' deve ser null.
+
+        Responda APENAS com um objeto JSON válido, seguindo este formato:
+        {
+          "reasoning": "Seu raciocínio passo a passo aqui.",
+          "extracted_name": "PrimeiroNomeDoUsuario"
+        }
+        `;
+
+        const response = await openai.chat.completions.create({
             model: 'gpt-4o',
-            messages: [
-                { 
-                    role: 'system', 
-                    content: "Você é um especialista em extrair nomes de pessoas de frases em português. A frase a seguir é de um usuário se apresentando. Sua tarefa é extrair o nome DO USUÁRIO que está falando. O usuário pode dizer 'meu nome é...', 'eu sou o...', 'aqui é o...'. Ignore outros nomes que possam aparecer (como o nome do atendente). Responda APENAS com o primeiro nome do usuário. Se nenhum nome de usuário for encontrado, responda com a palavra 'NULL'."
-                },
-                { role: 'user', content: message }
-            ],
-            temperature: 0,
-            max_tokens: 10,
+            messages: [{ role: 'system', content: nameExtractionPrompt }],
+            // Força a IA a retornar uma resposta no formato JSON
+            response_format: { type: "json_object" } 
         });
 
-        const potentialName = nameExtractionResponse.choices[0].message.content.trim();
+        const responseContent = response.choices[0].message.content;
+        console.log('[IA Onboarding] Resposta JSON da IA:', responseContent);
 
-        if (!potentialName || potentialName.toUpperCase() === 'NULL' || potentialName.length < 2) {
-            return `Desculpe, não consegui identificar seu nome. Por favor, poderia me dizer apenas como devo te chamar?`;
+        try {
+            const result = JSON.parse(responseContent);
+            const potentialName = result.extracted_name;
+
+            if (!potentialName || potentialName.length < 2) {
+                return `Desculpe, não consegui identificar seu nome. Por favor, poderia me dizer apenas como devo te chamar?`;
+            }
+
+            const formattedName = potentialName.split(" ")[0].charAt(0).toUpperCase() + potentialName.split(" ")[0].slice(1).toLowerCase();
+            session.firstName = formattedName;
+            session.onboardingState = 'complete';
+            session.state = 'nepq_discovery';
+
+            const welcomeMessage = `Perfeito, ${formattedName}! É um prazer falar com você. 😊 Para eu te ajudar da melhor forma, pode me contar o que te motivou a procurar o Dr. ${doctorName} hoje?`;
+            session.conversationHistory = [
+                { role: 'user', content: `O paciente se apresentou como ${formattedName}.` },
+                { role: 'assistant', content: welcomeMessage }
+            ];
+            
+            return welcomeMessage;
+        } catch (e) {
+            console.error("Erro ao processar JSON da IA:", e);
+            return `Desculpe, estou com uma dificuldade técnica para entender sua resposta. Poderia repetir seu nome, por favor?`;
         }
-        
-        const formattedName = potentialName.charAt(0).toUpperCase() + potentialName.slice(1).toLowerCase();
-        session.firstName = formattedName;
-        session.onboardingState = 'complete';
-        session.state = 'nepq_discovery';
-
-        const welcomeMessage = `Perfeito, ${formattedName}! É um prazer falar com você. 😊 Para eu te ajudar da melhor forma, pode me contar o que te motivou a procurar o ${doctorName} hoje?`;
-
-        session.conversationHistory = [];
-        session.conversationHistory.push({ role: 'user', content: `O paciente disse que seu nome é ${formattedName}.` });
-        session.conversationHistory.push({ role: 'assistant', content: welcomeMessage });
-        
-        return welcomeMessage;
     }
 
     return null;
 }
 
+// Lembre-se de que a exportação e a chamada no webhook.handler.js devem ser async
 module.exports = { getLlmReply, handleInitialMessage };
