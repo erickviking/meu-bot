@@ -61,18 +61,15 @@ async function saveMessage(messageData) {
 async function clearConversationHistory(patientPhone, clinicId) {
     console.log(`[Service] Solicitando limpeza de histórico para ${patientPhone}`);
     try {
+        // CORREÇÃO: Garantimos que os nomes dos parâmetros correspondem
+        // exatamente aos definidos na sua função SQL.
         const { error } = await supabase.rpc('clear_conversation_history', {
             p_patient_phone: patientPhone,
             p_clinic_id: clinicId
         });
-
-        if (error) {
-            throw error;
-        }
-
+        if (error) throw error;
         console.log(`[Service] Histórico para ${patientPhone} limpo com sucesso.`);
         return true;
-
     } catch (error) {
         console.error(`❌ Erro ao limpar histórico para ${patientPhone}:`, error.message);
         return false;
