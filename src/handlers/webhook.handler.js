@@ -6,14 +6,17 @@ const { getLlmReply, handleInitialMessage } = require('./nepq.handler');
 const { simulateTypingDelay } = require('../utils/helpers');
 const { isEmergency, getEmergencyResponse } = require('../utils/emergencyDetector');
 const { detetarObjeção } = require('./objection.handler');
-const { saveMessage } = require('../services/message.service');
+const { saveMessage, clearConversationHistory } = require('../services/message.service');
+const { generateAndSaveSummary } = require('../services/summary.service'); 
 const { createClient } = require('@supabase/supabase-js');
 const axios = require('axios');
 
-// A inicialização do cliente Supabase aqui pode ser redundante se você já tem um cliente singleton.
-// Recomendo usar o cliente exportado de 'src/services/supabase.client.js' para consistência.
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY);
 const debounceTimers = new Map();
+const summaryTimers = new Map(); // Mapa para guardar os timers de resumo
+
+// Tempo de inatividade para gerar resumo (1 hora em milissegundos)
+const SUMMARY_INACTIVITY_TIMEOUT = 60 * 60 * 1000; 
 
 async function getProfilePicture(phoneNumberId, accessToken) {
   try {
@@ -87,23 +90,34 @@ async function processIncomingMessage(req, res) {
 
     res.sendStatus(200);
 
+    // A cada nova mensagem, cancela o timer de resumo anterior para reiniciar a contagem.
+    if (summaryTimers.has(from)) {
+        clearTimeout(summaryTimers.get(from));
+        console.log(`[Auto-Summary] Timer de inatividade para ${from} foi resetado.`);
+    }
+
     const { data: existingPatient } = await supabase.from('patients').select('name').eq('phone', from).maybeSingle();
     if (!existingPatient || !existingPatient.name) {
       const profilePicUrl = await getProfilePicture(phoneNumberId, config.whatsapp.token);
-      console.log(`[Webhook] Salvando paciente novo: ${nameFromContact} (${from})`);
       await supabase.from('patients').upsert({ phone: from, name: nameFromContact || from, profile_picture_url: profilePicUrl }, { onConflict: ['phone'] });
     }
+
+    const session = await sessionManager.getSession(from);
 
     if (text.toLowerCase() === '/novaconversa') {
       if (debounceTimers.has(from)) clearTimeout(debounceTimers.get(from));
       debounceTimers.delete(from);
+      if (summaryTimers.has(from)) clearTimeout(summaryTimers.get(from));
+      summaryTimers.delete(from);
+
+      if (session.clinicConfig?.id) {
+        await clearConversationHistory(from, session.clinicConfig.id);
+      }
+      
       await sessionManager.resetSession(from);
-      console.log(`✅ Sessão para ${from} foi resetada.`);
-      await whatsappService.sendMessage(from, "Sessão reiniciada. Pode começar uma nova conversa.");
+      await whatsappService.sendMessage(from, "Sessão e histórico reiniciados. Pode começar uma nova conversa.");
       return;
     }
-
-    const session = await sessionManager.getSession(from);
 
     if (session.clinicConfig?.id) {
       await saveMessage({
@@ -115,49 +129,32 @@ async function processIncomingMessage(req, res) {
     }
 
     if (isEmergency(text)) {
-      console.log(`🚨 [Guardrail] Emergência detectada para ${from}.`);
       const emergencyResponse = getEmergencyResponse(session.firstName);
       await whatsappService.sendMessage(from, emergencyResponse);
-      // Opcional: Salvar a resposta de emergência no banco de dados
-      // await saveMessage({ content: emergencyResponse, direction: 'outbound', ... });
       return;
     }
 
-    // --- BLOCO DE ONBOARDING CORRIGIDO ---
     if (session.onboardingState !== 'complete') {
       const onboardingResponse = await handleInitialMessage(session, text, session.clinicConfig);
       if (onboardingResponse) {
         await sessionManager.saveSession(from, session);
         await simulateTypingDelay(onboardingResponse);
         await whatsappService.sendMessage(from, onboardingResponse);
-
-        // --- INÍCIO DA CORREÇÃO ---
-        // Garante que a resposta de onboarding enviada também seja salva no banco de dados.
         if (session.clinicConfig?.id) {
             await saveMessage({
-                content: onboardingResponse,
-                direction: 'outbound',
-                patient_phone: from,
-                clinic_id: session.clinicConfig.id
+                content: onboardingResponse, direction: 'outbound', patient_phone: from, clinic_id: session.clinicConfig.id
             });
         }
-        // --- FIM DA CORREÇÃO ---
-        
-        return; // Encerra a execução após lidar com o onboarding.
+        return;
       }
     }
 
     if (session.state === 'closing_delivered') {
-      console.log(`[FSM] Estado 'closing_delivered'. Verificando objeções para: "${text}"`);
       const objectionResponse = detetarObjeção(text, session.firstName);
       if (objectionResponse) {
-        console.log(`💡 [Guardrail] Objeção pós-fechamento detectada.`);
         if (session.clinicConfig?.id) {
           await saveMessage({
-            content: objectionResponse,
-            direction: 'outbound',
-            patient_phone: from,
-            clinic_id: session.clinicConfig.id
+            content: objectionResponse, direction: 'outbound', patient_phone: from, clinic_id: session.clinicConfig.id
           });
         }
         await simulateTypingDelay(objectionResponse);
@@ -166,22 +163,27 @@ async function processIncomingMessage(req, res) {
       }
     }
 
-    console.log(`[FSM] Mensagem de ${from} no estado '${session.state}' segue para a IA.`);
-
     if (debounceTimers.has(from)) {
       clearTimeout(debounceTimers.get(from));
     }
-
     const userBuffer = session.messageBuffer || [];
     userBuffer.push(text);
     session.messageBuffer = userBuffer;
     await sessionManager.saveSession(from, session);
-
-    const newTimer = setTimeout(() => {
+    const newDebounceTimer = setTimeout(() => {
       processBufferedMessages(from);
     }, 3500);
+    debounceTimers.set(from, newDebounceTimer);
 
-    debounceTimers.set(from, newTimer);
+    // No final do processamento, cria um NOVO timer de resumo.
+    if (session.clinicConfig?.id) {
+        const newSummaryTimer = setTimeout(() => {
+            console.log(`[Auto-Summary] Inatividade de 1h detectada para ${from}. Gerando resumo...`);
+            generateAndSaveSummary(from, session.clinicConfig.id);
+            summaryTimers.delete(from);
+        }, SUMMARY_INACTIVITY_TIMEOUT);
+        summaryTimers.set(from, newSummaryTimer);
+    }
 
   } catch (error) {
     console.error('❌ Erro fatal no webhook handler:', error);
