@@ -1,19 +1,20 @@
 // File: src/services/message.service.js
 
 const supabase = require('./supabase.client');
+const logger = require('../utils/logger');
 
 // O nome do canal base, que será combinado com o ID do paciente.
 const BASE_CHANNEL_NAME = 'realtime-chat';
 
 async function saveMessage(messageData) {
-    console.log('[MessageService] Função saveMessage iniciada:', messageData);
+    logger.info('[MessageService] Função saveMessage iniciada:', messageData);
 
     if (!messageData.clinic_id || !messageData.patient_phone) {
-        console.error('[MessageService] ERRO: clinic_id e patient_phone são obrigatórios. Abortando.');
+        logger.error('[MessageService] ERRO: clinic_id e patient_phone são obrigatórios. Abortando.');
         return;
     }
     if (!messageData.content || messageData.content.trim() === '') {
-        console.warn('[MessageService] AVISO: Conteúdo da mensagem está vazio. Abortando save.');
+        logger.warn('[MessageService] AVISO: Conteúdo da mensagem está vazio. Abortando save.');
         return;
     }
 
@@ -25,15 +26,15 @@ async function saveMessage(messageData) {
             .single();
 
         if (error) {
-            console.error('❌ [MessageService] ERRO DO SUPABASE ao salvar:', JSON.stringify(error, null, 2));
+            logger.error('❌ [MessageService] ERRO DO SUPABASE ao salvar:', JSON.stringify(error, null, 2));
             return;
         }
 
-        console.log('✅ [MessageService] Mensagem salva com sucesso:', newMessage);
+        logger.info('✅ [MessageService] Mensagem salva com sucesso:', newMessage);
 
         if (newMessage) {
             const channelName = `${BASE_CHANNEL_NAME}:${newMessage.patient_phone}`;
-            console.log(`[MessageService] Anunciando mensagem no canal dinâmico: "${channelName}"`);
+            logger.info(`[MessageService] Anunciando mensagem no canal dinâmico: "${channelName}"`);
             
             const channel = supabase.channel(channelName);
 
@@ -42,11 +43,11 @@ async function saveMessage(messageData) {
                 event: 'new_message',
                 payload: newMessage,
             });
-            console.log('📢 [MessageService] Mensagem anunciada com sucesso.');
+            logger.info('📢 [MessageService] Mensagem anunciada com sucesso.');
         }
 
     } catch (err) {
-        console.error('❌ [MessageService] ERRO FATAL NO TRY/CATCH:', JSON.stringify(err, null, 2));
+        logger.error('❌ [MessageService] ERRO FATAL NO TRY/CATCH:', JSON.stringify(err, null, 2));
     }
 }
 
@@ -59,7 +60,7 @@ async function saveMessage(messageData) {
  * @param {string} clinicId - O ID da clínica para garantir a segurança.
  */
 async function clearConversationHistory(patientPhone, clinicId) {
-    console.log(`[Service] Solicitando limpeza de histórico para ${patientPhone}`);
+    logger.info(`[Service] Solicitando limpeza de histórico para ${patientPhone}`);
     try {
         // CORREÇÃO: Garantimos que os nomes dos parâmetros correspondem
         // exatamente aos definidos na sua função SQL.
@@ -68,10 +69,10 @@ async function clearConversationHistory(patientPhone, clinicId) {
             p_clinic_id: clinicId
         });
         if (error) throw error;
-        console.log(`[Service] Histórico para ${patientPhone} limpo com sucesso.`);
+        logger.info(`[Service] Histórico para ${patientPhone} limpo com sucesso.`);
         return true;
     } catch (error) {
-        console.error(`❌ Erro ao limpar histórico para ${patientPhone}:`, error.message);
+        logger.error(`❌ Erro ao limpar histórico para ${patientPhone}:`, error.message);
         return false;
     }
 }

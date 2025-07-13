@@ -4,6 +4,8 @@
  * e responde com textos de alta conversão pré-definidos.
  */
 
+const logger = require('../utils/logger');
+
 const objections = [
   {
     id: 'plano-de-saude',
@@ -55,7 +57,7 @@ function detetarObjeção(mensagem, nomeDoPaciente) {
   
   for (const obj of objections) {
     if (obj.keywords.some(k => texto.includes(k))) {
-      console.log(`💡 Objeção detectada por palavra-chave: ${obj.id}`);
+      logger.info(`💡 Objeção detectada por palavra-chave: ${obj.id}`);
       // Retorna a resposta personalizada com o nome do paciente
       return obj.resposta(nome);
     }

@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const config = require('./config');
 const allRoutes = require('./routes');
 const cors = require('cors');
+const logger = require('./utils/logger');
 
 const app = express();
 
@@ -22,7 +23,7 @@ const verifyRequestSignature = (req, res, buf) => {
     if (req.originalUrl.includes('/webhook')) {
         const signature = req.headers['x-hub-signature-256'];
         if (!signature) {
-            console.warn('⚠️ Assinatura de segurança (x-hub-signature-256) ausente.');
+            logger.warn('⚠️ Assinatura de segurança (x-hub-signature-256) ausente.');
             return;
         }
         const signatureHash = signature.split('=')[1];
@@ -42,7 +43,7 @@ const verifyRequestSignature = (req, res, buf) => {
 try {
     app.use(bodyParser.json({ verify: verifyRequestSignature }));
 } catch (error) {
-    console.error('❌ Falha ao aplicar middleware de segurança:', error);
+    logger.error({ err: error }, '❌ Falha ao aplicar middleware de segurança');
     process.exit(1);
 }
 

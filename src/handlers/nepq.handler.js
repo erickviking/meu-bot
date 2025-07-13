@@ -2,8 +2,9 @@
 const config = require('../config');
 const { OpenAI } = require('openai');
 // A função 'formatAsName' não é mais necessária para extrair o nome.
-// const { formatAsName } = require('../utils/helpers'); 
+// const { formatAsName } = require('../utils/helpers');
 const { buildPromptForClinic } = require('../services/promptBuilder');
+const logger = require('../utils/logger');
 
 // Inicializa o cliente da OpenAI com a chave de API.
 const openai = new OpenAI({ apiKey: config.openai.apiKey });
@@ -49,14 +50,14 @@ async function getLlmReply(session, latestMessage) {
             botReply.includes("O valor da consulta é");
 
         if (isClosingStatement && session.state === 'nepq_discovery') {
-            console.log(`[FSM] Fechamento detectado. Mudando estado para 'closing_delivered'.`);
+            logger.info(`[FSM] Fechamento detectado. Mudando estado para 'closing_delivered'.`);
             return { reply: botReply, newState: 'closing_delivered' };
         }
 
         return { reply: botReply, newState: session.state };
 
     } catch (error) {
-        console.error('🚨 Erro na chamada da API da OpenAI:', error);
+        logger.error('🚨 Erro na chamada da API da OpenAI:', error);
         return { 
             reply: `Desculpe, ${session.firstName || 'amigo(a)'}, estou com uma dificuldade técnica.`,
             newState: session.state 
@@ -84,7 +85,7 @@ async function handleInitialMessage(session, message, clinicConfig) {
     }
 
     if (currentState === 'awaiting_name') {
-        console.log(`[IA Onboarding] Tentando extrair nome da frase: "${message}"`);
+        logger.info(`[IA Onboarding] Tentando extrair nome da frase: "${message}"`);
         
         // --- NOVO PROMPT ESTRUTURADO ---
         const nameExtractionPrompt = `
@@ -112,7 +113,7 @@ async function handleInitialMessage(session, message, clinicConfig) {
         });
 
         const responseContent = response.choices[0].message.content;
-        console.log('[IA Onboarding] Resposta JSON da IA:', responseContent);
+        logger.debug('[IA Onboarding] Resposta JSON da IA:', responseContent);
 
         try {
             const result = JSON.parse(responseContent);
@@ -135,7 +136,7 @@ async function handleInitialMessage(session, message, clinicConfig) {
             
             return welcomeMessage;
         } catch (e) {
-            console.error("Erro ao processar JSON da IA:", e);
+            logger.error("Erro ao processar JSON da IA:", e);
             return `Desculpe, estou com uma dificuldade técnica para entender sua resposta. Poderia repetir seu nome, por favor?`;
         }
     }

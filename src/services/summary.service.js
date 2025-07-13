@@ -3,6 +3,7 @@
 const { OpenAI } = require('openai');
 const config = require('../config');
 const supabase = require('./supabase.client');
+const logger = require('../utils/logger');
 
 // Inicializa o cliente OpenAI
 const openai = new OpenAI({ apiKey: config.openai.apiKey });
@@ -14,7 +15,7 @@ const openai = new OpenAI({ apiKey: config.openai.apiKey });
  * @returns {Promise<object>} O objeto do resumo salvo ou um objeto com { error } em caso de falha.
  */
 async function generateAndSaveSummary(patientPhone, clinicId) {
-  console.log(`[SummaryService] Iniciando resumo para ${patientPhone} na clínica ${clinicId}.`);
+  logger.info(`[SummaryService] Iniciando resumo para ${patientPhone} na clínica ${clinicId}.`);
 
   try {
     // ETAPA 1: Buscar a base de conhecimento
@@ -42,7 +43,7 @@ async function generateAndSaveSummary(patientPhone, clinicId) {
       .limit(30);
 
     if (msgError || !messages || messages.length === 0) {
-      console.warn(`[SummaryService] Nenhuma mensagem encontrada para ${patientPhone}.`);
+      logger.warn(`[SummaryService] Nenhuma mensagem encontrada para ${patientPhone}.`);
       return { error: 'Sem mensagens para gerar resumo.' };
     }
 
@@ -94,15 +95,15 @@ ${conversationText}
       throw new Error(`Erro ao salvar resumo: ${summaryError.message}`);
     }
 
-    console.log(`[SummaryService] Resumo salvo com sucesso para ${patientPhone}.`);
-return { summary: summaryText };
+    logger.info(`[SummaryService] Resumo salvo com sucesso para ${patientPhone}.`);
+    return { summary: summaryText };
 
   } catch (error) {
-    console.error("❌ Erro interno ao gerar resumo:", error);
+    logger.error({ err: error }, '❌ Erro interno ao gerar resumo');
     return { error: error.message || "Erro desconhecido." };
   }
 }
 
-console.log("✅ Função generateAndSaveSummary definida:", typeof generateAndSaveSummary);
+logger.debug("✅ Função generateAndSaveSummary definida:", typeof generateAndSaveSummary);
 
 module.exports = { generateAndSaveSummary };

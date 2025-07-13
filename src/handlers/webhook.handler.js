@@ -11,6 +11,7 @@ const { saveMessage, clearConversationHistory } = require('../services/message.s
 const { generateAndSaveSummary } = require('../services/summary.service'); 
 const { createClient } = require('@supabase/supabase-js');
 const axios = require('axios');
+const logger = require('../utils/logger');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY);
 const debounceTimers = new Map();
@@ -28,7 +29,7 @@ async function getProfilePicture(phoneNumberId, accessToken) {
     });
     return response.request.res.responseUrl || null;
   } catch (error) {
-    console.error('[WhatsApp] Erro ao buscar foto de perfil:', error.message);
+    logger.error('[WhatsApp] Erro ao buscar foto de perfil:', error.message);
     return null;
   }
 }
@@ -53,7 +54,7 @@ async function processBufferedMessages(from) {
     return;
   }
   const fullMessage = bufferedMessages.join('. ');
-  console.log(`[Debounce] Processando mensagem agrupada de ${from}: "${fullMessage}"`);
+  logger.info(`[Debounce] Processando mensagem agrupada de ${from}: "${fullMessage}"`);
   session.messageBuffer = [];
   const llmResult = await getLlmReply(session, fullMessage);
   if (session.clinicConfig?.id && llmResult.reply) {
@@ -108,7 +109,7 @@ async function processIncomingMessage(req, res) {
     // A cada nova mensagem, cancela o timer de resumo anterior para reiniciar a contagem.
     if (summaryTimers.has(from)) {
         clearTimeout(summaryTimers.get(from));
-        console.log(`[Auto-Summary] Timer de inatividade para ${from} foi resetado.`);
+        logger.info(`[Auto-Summary] Timer de inatividade para ${from} foi resetado.`);
     }
 
     const { data: existingPatient } = await supabase.from('patients').select('name').eq('phone', from).maybeSingle();
@@ -129,7 +130,7 @@ async function processIncomingMessage(req, res) {
         // Se a IA estiver inativa para este paciente, o webhook apenas salva a mensagem
         // e encerra, sem enviar para a lógica de resposta da IA.
         if (patient && !patient.is_ai_active) {
-            console.log(`[Webhook] IA pausada para ${from}. Apenas salvando a mensagem.`);
+            logger.info(`[Webhook] IA pausada para ${from}. Apenas salvando a mensagem.`);
             await saveMessage({
                 content: text, direction: 'inbound', patient_phone: from, clinic_id: session.clinicConfig.id
             });
@@ -215,7 +216,7 @@ async function processIncomingMessage(req, res) {
     // No final do processamento, cria um NOVO timer de resumo.
     if (session.clinicConfig?.id) {
         const newSummaryTimer = setTimeout(() => {
-            console.log(`[Auto-Summary] Inatividade de 1h detectada para ${from}. Gerando resumo...`);
+            logger.info(`[Auto-Summary] Inatividade de 1h detectada para ${from}. Gerando resumo...`);
             generateAndSaveSummary(from, session.clinicConfig.id);
             summaryTimers.delete(from);
         }, SUMMARY_INACTIVITY_TIMEOUT);
@@ -223,17 +224,17 @@ async function processIncomingMessage(req, res) {
     }
 
   } catch (error) {
-    console.error('❌ Erro fatal no webhook handler:', error);
+    logger.error('❌ Erro fatal no webhook handler:', error);
   }
 }
 
 function verifyWebhook(req, res) {
   const VERIFY_TOKEN = config.whatsapp.verifyToken;
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
-    console.log('✅ Webhook verificado com sucesso!');
+    logger.info('✅ Webhook verificado com sucesso!');
     res.status(200).send(req.query['hub.challenge']);
   } else {
-    console.error('❌ Falha na verificação do Webhook.');
+    logger.error('❌ Falha na verificação do Webhook.');
     res.sendStatus(403);
   }
 }

@@ -1,6 +1,7 @@
 // File: src/services/transcription.service.js (Versão Corrigida)
 const { OpenAI } = require('openai');
 const config = require('../config');
+const logger = require('../utils/logger');
 
 const openai = new OpenAI({ apiKey: config.openai.apiKey });
 
@@ -24,7 +25,7 @@ async function transcribeAudio(buffer) {
 
         return transcription.text?.trim() || '';
     } catch (error) {
-        console.error('[TranscriptionService] Erro ao transcrever áudio:', error.message);
+        logger.error('[TranscriptionService] Erro ao transcrever áudio:', error.message);
         return '';
     }
 }
