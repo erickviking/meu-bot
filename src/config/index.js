@@ -16,7 +16,15 @@ const config = {
     supabase: {
         url: process.env.SUPABASE_URL,
         apiKey: process.env.SUPABASE_API_KEY
+    },
+    // --- INÍCIO DA ALTERAÇÃO ---
+    // Adicionamos a nova seção para as configurações do Google
+    google: {
+        // O ID da agenda de cada clínica será buscado do banco de dados,
+        // mas as credenciais JSON vêm do ambiente.
+        credentialsJson: process.env.GOOGLE_CREDENTIALS_JSON
     }
+    // --- FIM DA ALTERAÇÃO ---
 };
 
 // Validação para garantir que a aplicação não inicie sem as chaves críticas.
@@ -28,7 +36,11 @@ const requiredConfigs = [
     'openai.apiKey',
     'redisUrl',
     'supabase.url',
-    'supabase.apiKey'
+    'supabase.apiKey',
+    // --- INÍCIO DA ALTERAÇÃO ---
+    // Adicionamos a credencial do Google à lista de validação.
+    'google.credentialsJson'
+    // --- FIM DA ALTERAÇÃO ---
 ];
 
 // Função auxiliar para buscar valores aninhados no objeto de configuração.
