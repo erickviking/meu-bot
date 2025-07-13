@@ -1,26 +1,39 @@
 // src/handlers/nepq.handler.js
 const config = require('../config');
 const { OpenAI } = require('openai');
-// A função 'formatAsName' não é mais necessária para extrair o nome.
-// const { formatAsName } = require('../utils/helpers'); 
 const { buildPromptForClinic } = require('../services/promptBuilder');
+// 1. IMPORTAMOS O NOVO SERVIÇO DE AGENDA
+const calendarService = require('../services/calendar.service'); 
 
 // Inicializa o cliente da OpenAI com a chave de API.
 const openai = new OpenAI({ apiKey: config.openai.apiKey });
 
+// --- FUNÇÕES AUXILIARES PARA DATA/HORA ---
+// (Estas são funções de exemplo. Você pode precisar de uma biblioteca como 'date-fns-tz' para uma conversão mais robusta)
+function convertToISO(dateString) {
+    // Exemplo SIMPLES. Adapte conforme o formato que a IA retorna.
+    // Supondo que a IA retorne "15 de julho de 2025, às 10h"
+    // Esta função precisaria de uma lógica mais complexa para converter isso em "2025-07-15T10:00:00-03:00"
+    console.warn(`[Helper] A conversão de data/hora precisa ser implementada. Usando data atual como fallback.`);
+    return new Date().toISOString();
+}
+
+function calculateEndTime(startDateTime, durationMinutes = 50) {
+    const startDate = new Date(startDateTime);
+    const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
+    return endDate.toISOString();
+}
+
+
 /**
- * Função principal que se comunica com a LLM.
- * AGORA ELA PASSA A SESSÃO COMPLETA PARA O PROMPT BUILDER.
+ * Função principal que se comunica com a LLM e agora também com o Google Agenda.
  * @param {object} session - O objeto de sessão completo do usuário.
  * @param {string} latestMessage - A última mensagem enviada pelo usuário.
  * @returns {Promise<object>} Um objeto contendo a resposta da IA e o novo estado da conversa.
  */
 async function getLlmReply(session, latestMessage) {
     try {
-        // --- INÍCIO DA CORREÇÃO ---
-        // Agora passamos a sessão inteira para que o prompt seja sensível ao estado.
         const systemPrompt = buildPromptForClinic(session.clinicConfig, session);
-        // --- FIM DA CORREÇÃO ---
 
         const messages = [
             { role: 'system', content: systemPrompt },
@@ -52,6 +65,36 @@ async function getLlmReply(session, latestMessage) {
             console.log(`[FSM] Fechamento detectado. Mudando estado para 'closing_delivered'.`);
             return { reply: botReply, newState: 'closing_delivered' };
         }
+        
+        // --- INÍCIO DA INTEGRAÇÃO COM GOOGLE AGENDA ---
+        // Exemplo: Se a IA confirmar um agendamento, ela pode retornar um estado 'booking_confirmed'
+        // A lógica exata para detectar isso dependerá do seu prompt.
+        const isBookingConfirmed = botReply.toLowerCase().includes("horário confirmado") || botReply.toLowerCase().includes("agendado com sucesso");
+
+        if (isBookingConfirmed) {
+            console.log(`[FSM] Agendamento confirmado pela IA. Criando evento no Google Agenda...`);
+            const clinicCalendarId = session.clinicConfig?.google_calendar_id;
+
+            if (clinicCalendarId) {
+                // A IA precisaria extrair a data/hora da conversa e salvar na sessão.
+                // Ex: session.extractedData = { appointment: "15 de Julho de 2025, 10:00" }
+                const appointmentString = "15 de Julho de 2025, 10:00"; // Exemplo
+                const startDateTime = convertToISO(appointmentString);
+                const endDateTime = calculateEndTime(startDateTime);
+
+                await calendarService.createEvent(clinicCalendarId, {
+                    summary: `Consulta - ${session.firstName}`,
+                    description: `Agendamento via assistente virtual para ${session.firstName}.\nTelefone: ${session.from}`,
+                    startDateTime,
+                    endDateTime,
+                });
+            } else {
+                console.warn(`⚠️ A clínica ${session.clinicConfig.doctorName} não tem um Google Agenda configurado.`);
+            }
+
+            return { reply: botReply, newState: 'booked' };
+        }
+        // --- FIM DA INTEGRAÇÃO COM GOOGLE AGENDA ---
 
         return { reply: botReply, newState: session.state };
 
@@ -64,14 +107,9 @@ async function getLlmReply(session, latestMessage) {
     }
 }
 
-// File: src/handlers/nepq.handler.js
-
-// ... (outros imports e a função getLlmReply permanecem os mesmos) ...
 
 /**
- * VERSÃO FINAL E AVANÇADA: Gerencia o onboarding usando IA para extrair o nome
- * com um processo de raciocínio e resposta em JSON.
- * @returns {Promise<string | null>}
+ * VERSÃO FINAL E AVANÇADA: Gerencia o onboarding usando IA para extrair o nome.
  */
 async function handleInitialMessage(session, message, clinicConfig) {
     const currentState = session.onboardingState;
@@ -86,28 +124,21 @@ async function handleInitialMessage(session, message, clinicConfig) {
     if (currentState === 'awaiting_name') {
         console.log(`[IA Onboarding] Tentando extrair nome da frase: "${message}"`);
         
-        // --- NOVO PROMPT ESTRUTURADO ---
         const nameExtractionPrompt = `
         Sua tarefa é analisar a frase de um usuário que está se apresentando para uma secretária chamada 'Ana' e extrair o primeiro nome do usuário.
-
         Siga este processo de raciocínio:
         1. Analise a frase: "${message}".
         2. Identifique todos os nomes de pessoas na frase.
         3. Determine qual nome pertence ao USUÁRIO que está falando, ignorando o nome da secretária ('Ana').
         4. Se um nome de usuário for encontrado, coloque-o no campo 'extracted_name'.
         5. Se nenhum nome de usuário for encontrado, ou se for apenas um cumprimento, o valor de 'extracted_name' deve ser null.
-
         Responda APENAS com um objeto JSON válido, seguindo este formato:
-        {
-          "reasoning": "Seu raciocínio passo a passo aqui.",
-          "extracted_name": "PrimeiroNomeDoUsuario"
-        }
+        { "reasoning": "Seu raciocínio passo a passo aqui.", "extracted_name": "PrimeiroNomeDoUsuario" }
         `;
 
         const response = await openai.chat.completions.create({
             model: 'gpt-4o',
             messages: [{ role: 'system', content: nameExtractionPrompt }],
-            // Força a IA a retornar uma resposta no formato JSON
             response_format: { type: "json_object" } 
         });
 
@@ -143,5 +174,4 @@ async function handleInitialMessage(session, message, clinicConfig) {
     return null;
 }
 
-// Lembre-se de que a exportação e a chamada no webhook.handler.js devem ser async
 module.exports = { getLlmReply, handleInitialMessage };
