@@ -119,6 +119,28 @@ async function processIncomingMessage(req, res) {
 
     const session = await sessionManager.getSession(from);
 
+            // --- INÍCIO DA MODIFICAÇÃO: VERIFICAÇÃO DE PAUSA DA IA ---
+        const { data: patient } = await supabase
+            .from('patients')
+            .select('is_ai_active')
+            .eq('phone', from)
+            .single();
+
+        // Se a IA estiver inativa para este paciente, o webhook apenas salva a mensagem
+        // e encerra, sem enviar para a lógica de resposta da IA.
+        if (patient && !patient.is_ai_active) {
+            console.log(`[Webhook] IA pausada para ${from}. Apenas salvando a mensagem.`);
+            await saveMessage({
+                content: text, direction: 'inbound', patient_phone: from, clinic_id: session.clinicConfig.id
+            });
+            // Não esqueça de resetar o timer de resumo automático, se estiver usando
+            if (summaryTimers.has(from)) {
+                clearTimeout(summaryTimers.get(from));
+            }
+            return; // Encerra a execução aqui.
+        }
+        // --- FIM DA MODIFICAÇÃO ---
+
     if (text.toLowerCase() === '/novaconversa') {
       if (debounceTimers.has(from)) clearTimeout(debounceTimers.get(from));
       debounceTimers.delete(from);
