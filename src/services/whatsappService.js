@@ -1,5 +1,6 @@
 // src/services/whatsappService.js
 const config = require('../config');
+const logger = require('../utils/logger');
 
 async function sendMessage(to, text) {
     try {
@@ -18,11 +19,11 @@ async function sendMessage(to, text) {
 
         if (!response.ok) {
             const errorData = await response.json();
-            console.error('❌ Erro da API do WhatsApp:', JSON.stringify(errorData, null, 2));
+            logger.error('❌ Erro da API do WhatsApp:', JSON.stringify(errorData, null, 2));
         }
 
     } catch (error) {
-        console.error('❌ Erro de rede ao enviar mensagem via WhatsApp API:', error.message);
+        logger.error('❌ Erro de rede ao enviar mensagem via WhatsApp API:', error.message);
     }
 }
 
@@ -33,7 +34,7 @@ async function downloadMedia(mediaId) {
             headers: { 'Authorization': `Bearer ${config.whatsapp.token}` }
         });
         if (!infoRes.ok) {
-            console.error('❌ Falha ao obter URL do media:', await infoRes.text());
+            logger.error('❌ Falha ao obter URL do media:', await infoRes.text());
             return null;
         }
         const info = await infoRes.json();
@@ -41,13 +42,13 @@ async function downloadMedia(mediaId) {
             headers: { 'Authorization': `Bearer ${config.whatsapp.token}` }
         });
         if (!mediaRes.ok) {
-            console.error('❌ Falha ao baixar media:', await mediaRes.text());
+            logger.error('❌ Falha ao baixar media:', await mediaRes.text());
             return null;
         }
         const arrayBuffer = await mediaRes.arrayBuffer();
         return Buffer.from(arrayBuffer);
     } catch (error) {
-        console.error('❌ Erro ao baixar media:', error.message);
+        logger.error('❌ Erro ao baixar media:', error.message);
         return null;
     }
 }

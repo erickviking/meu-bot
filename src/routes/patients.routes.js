@@ -3,6 +3,7 @@ const express = require('express');
 const supabase = require('../services/supabase.client');
 
 const router = express.Router();
+const logger = require('../utils/logger');
 
 // Rota para atualizar o status da automação de um paciente
 // PATCH /api/v1/patients/5511.../toggle-automation
@@ -24,11 +25,11 @@ router.patch('/:phone/toggle-automation', async (req, res) => {
 
         if (error) throw error;
         
-        console.log(`[API] Automação para ${phone} atualizada para: ${isAiActive}`);
+        logger.info(`[API] Automação para ${phone} atualizada para: ${isAiActive}`);
         res.status(200).json(data);
 
     } catch (error) {
-        console.error('❌ Erro ao atualizar automação:', error.message);
+        logger.error('❌ Erro ao atualizar automação:', error.message);
         res.status(500).json({ error: 'Erro interno ao atualizar o status da automação.' });
     }
 });

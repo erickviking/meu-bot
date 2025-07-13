@@ -1,4 +1,5 @@
 require('dotenv').config();
+const logger = require('../utils/logger');
 
 const config = {
     port: process.env.PORT || 3000,
@@ -39,7 +40,7 @@ const missingConfigs = requiredConfigs.filter(path => !getConfigValue(path));
 
 // Se alguma configuração crítica estiver faltando, o processo é encerrado com um erro claro.
 if (missingConfigs.length > 0) {
-    console.error('❌ ERRO FATAL: Variáveis de ambiente críticas faltando:', missingConfigs.join(', '));
+    logger.fatal({ missingConfigs }, '❌ ERRO FATAL: Variáveis de ambiente críticas faltando');
     process.exit(1);
 }
 

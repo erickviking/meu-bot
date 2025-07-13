@@ -4,8 +4,8 @@ const express = require('express');
 const { generateAndSaveSummary } = require('../services/summary.service');
 
 const router = express.Router();
-
-console.log("🔍 Importação de summary.service:", require('../services/summary.service'));
+const logger = require('../utils/logger');
+logger.debug("🔍 Importação de summary.service:", require('../services/summary.service'));
 
 // POST /api/v1/conversations/:phone/summarize
 router.post('/:phone/summarize', async (req, res) => {
@@ -29,7 +29,7 @@ router.post('/:phone/summarize', async (req, res) => {
         return res.status(200).json({ summary: summaryData.summary });
 
     } catch (error) {
-        console.error('❌ Erro fatal no endpoint de resumo:', error);
+        logger.error('❌ Erro fatal no endpoint de resumo:', error);
         return res.status(500).json({ 
             error: 'Erro interno do servidor ao gerar resumo.',
             details: error.message

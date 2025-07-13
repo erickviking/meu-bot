@@ -1,4 +1,5 @@
 const supabase = require('./supabase.client');
+const logger = require('../utils/logger');
 
 /**
  * Busca a configuração completa de uma clínica no banco de dados
@@ -8,7 +9,7 @@ const supabase = require('./supabase.client');
  */
 async function getClinicConfigByWhatsappId(whatsappPhoneId) {
     if (!whatsappPhoneId) {
-        console.error('❌ ID do WhatsApp não fornecido para buscar a clínica.');
+        logger.error('❌ ID do WhatsApp não fornecido para buscar a clínica.');
         return null;
     }
 
@@ -21,7 +22,7 @@ async function getClinicConfigByWhatsappId(whatsappPhoneId) {
             .single();
 
         if (error) {
-            console.error(`🚨 Erro ao buscar clínica para o ID ${whatsappPhoneId}:`, error.message);
+            logger.error(`🚨 Erro ao buscar clínica para o ID ${whatsappPhoneId}:`, error.message);
             return null;
         }
 
@@ -39,7 +40,7 @@ async function getClinicConfigByWhatsappId(whatsappPhoneId) {
         return null;
 
     } catch (err) {
-        console.error('❌ Erro fatal no serviço da clínica:', err);
+        logger.error('❌ Erro fatal no serviço da clínica:', err);
         return null;
     }
 }
