@@ -11,6 +11,11 @@ const clinicRoutes = require('./clinics.routes');
 // Inicializa o roteador principal
 const router = express.Router();
 
+// Endpoint simples para checagem de saúde da aplicação
+router.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok' });
+});
+
 // Delega as rotas para os seus respectivos handlers
 router.use('/', webhookRoutes);
 router.use('/api/v1/conversations', conversationRoutes);
