@@ -7,28 +7,30 @@ const clinicService = require('./clinic.service');
 class SessionManager {
     constructor() {
         this.client = redis.createClient({ url: config.redisUrl });
+
+        // Se ocorrer um erro, apenas logamos. A falha será percebida ao tentar usar o Redis.
         this.client.on('error', (err) => {
-            console.error('❌ Redis error:', err);
-            this.fallbackToMemory = true;
+            console.error('❌ ERRO DE CONEXÃO COM REDIS:', err);
         });
-        this.client.on('connect', () => {
-            console.log('✅ Redis conectado - Sessions persistentes ativas');
-            this.fallbackToMemory = false;
-        });
-        this.memoryCache = new Map();
-        this.fallbackToMemory = false;
-        this.client.connect().catch(() => {
-            console.warn('⚠️ Redis indisponível - usando memory fallback');
-            this.fallbackToMemory = true;
-        });
+
+        this.client.connect()
+            .then(() => {
+                console.log('✅ Redis conectado - Sessions persistentes ativas');
+            })
+            .catch(err => {
+                console.error('🚨 FALHA CRÍTICA AO CONECTAR COM REDIS NA INICIALIZAÇÃO:', err);
+                // Em produção, considere terminar o processo para que o orquestrador o reinicie.
+                // process.exit(1);
+            });
     }
 
      createNewSession() {
         return {
             firstName: null,
-            onboardingState: 'start', // Podemos manter para o onboarding inicial
-            state: 'onboarding', // O NOVO ESTADO PRINCIPAL!
+            onboardingState: 'start',
+            state: 'onboarding',
             conversationHistory: [],
+            conversationSummary: '',
             messageBuffer: [],
             clinicConfig: null,
         };
@@ -40,74 +42,41 @@ class SessionManager {
     }
 
     async getSession(phone) {
-        let session;
-        try {
-            if (this.fallbackToMemory) {
-                session = this.getSessionFromMemory(phone);
+        const sessionData = await this.client.get(`session:${phone}`);
+        const session = sessionData ? JSON.parse(sessionData) : this.createNewSession();
+
+        // Garante compatibilidade com versões antigas da sessão
+        if (session.onboardingState === undefined) session.onboardingState = session.firstName ? 'complete' : 'start';
+        if (session.messageBuffer === undefined) session.messageBuffer = [];
+        if (session.conversationSummary === undefined) session.conversationSummary = '';
+
+        // ### INÍCIO DA LÓGICA MULTI-TENANT ###
+        if (!session.clinicConfig) {
+            console.log(`[Multi-Tenant] Configuração da clínica não encontrada para ${phone}. Buscando...`);
+
+            const botWhatsappId = config.whatsapp.phoneId;
+            const clinicConfig = await clinicService.getClinicConfigByWhatsappId(botWhatsappId);
+
+            if (clinicConfig) {
+                console.log(`[Multi-Tenant] Clínica "${clinicConfig.doctorName}" carregada para a sessão.`);
+                session.clinicConfig = clinicConfig;
+                await this.saveSession(phone, session);
             } else {
-                const sessionData = await this.client.get(`session:${phone}`);
-                session = sessionData ? JSON.parse(sessionData) : this.createNewSession();
+                console.error(`🚨 CRÍTICO: Nenhuma clínica encontrada para o whatsapp_phone_id: ${botWhatsappId}. Verifique o banco de dados.`);
             }
-
-            // Garante que sessões antigas tenham os novos campos
-            if (!session.onboardingState) session.onboardingState = session.firstName ? 'complete' : 'start';
-            if (!session.messageBuffer) session.messageBuffer = [];
-
-            // ### INÍCIO DA LÓGICA MULTI-TENANT ###
-            // Se a configuração da clínica ainda não foi carregada para esta sessão...
-            if (!session.clinicConfig) {
-                console.log(`[Multi-Tenant] Configuração da clínica não encontrada para ${phone}. Buscando...`);
-                
-                // O ID do número do seu bot deve vir do seu arquivo de configuração
-                const botWhatsappId = config.whatsapp.phoneId;
-                const clinicConfig = await clinicService.getClinicConfigByWhatsappId(botWhatsappId);
-
-                if (clinicConfig) {
-                    console.log(`[Multi-Tenant] Clínica "${clinicConfig.doctorName}" carregada para a sessão.`);
-                    session.clinicConfig = clinicConfig;
-                    // Salva a sessão enriquecida de volta no Redis para futuras requisições
-                    await this.saveSession(phone, session);
-                } else {
-                    // CASO CRÍTICO: Não há clínica cadastrada para este número de bot.
-                    // O sistema não pode operar sem isso.
-                    console.error(`🚨 CRÍTICO: Nenhuma clínica encontrada para o whatsapp_phone_id: ${botWhatsappId}. Verifique o banco de dados.`);
-                    // Retornar a sessão sem a config fará com que o sistema falhe de forma controlada mais adiante.
-                }
-            }
-            // ### FIM DA LÓGICA MULTI-TENANT ###
-
-            return session;
-
-        } catch (error) {
-            console.error('⚠️ Redis getSession falhou:', error.message);
-            this.fallbackToMemory = true;
-            return this.getSessionFromMemory(phone); // Retorna do fallback em caso de erro
         }
+        // ### FIM DA LÓGICA MULTI-TENANT ###
+
+        return session;
     }
 
     async saveSession(phone, session) {
-        try {
-            session.lastActivity = Date.now();
-            if (this.fallbackToMemory) {
-                this.memoryCache.set(phone, session);
-                return;
-            }
-            await this.client.setEx(`session:${phone}`, 86400, JSON.stringify(session)); // 24h TTL
-        } catch (error) {
-            console.error('⚠️ Redis saveSession falhou:', error.message);
-            this.memoryCache.set(phone, session);
-        }
+        session.lastActivity = Date.now();
+        await this.client.setEx(`session:${phone}`, 86400, JSON.stringify(session));
     }
 
-    getSessionFromMemory(phone) {
-        if (!this.memoryCache.has(phone)) {
-            this.memoryCache.set(phone, this.createNewSession());
-        }
-        return this.memoryCache.get(phone);
-    }
-    
     async close() {
-        if (!this.fallbackToMemory && this.client.isOpen) {
+        if (this.client.isOpen) {
             await this.client.disconnect();
             console.log('✅ Redis desconectado gracefully');
         }
