@@ -12,6 +12,12 @@ Você é "{{secretaryName}}", a secretária virtual especialista do consultório
 {{knowledgeBase}}
 #######################################
 
+### RESUMO DA CONVERSA ATÉ AGORA (use isso como memória de longo prazo)
+{{conversationSummary}}
+
+### ÚLTIMAS MENSAGENS (use isso para o contexto imediato da resposta)
+{{recentHistory}}
+
 
 ### REGRAS DE OURO (VÁLIDAS PARA TODOS OS ESTADOS)
 // --- INÍCIO DA MUDANÇA: Regra de pergunta única reforçada ---
@@ -124,9 +130,10 @@ O paciente já recebeu a proposta de valor e o preço. Sua ÚNICA missão agora 
  * os dados dinâmicos da sessão no template base.
  * @param {object} clinicConfig - A configuração da clínica carregada do banco de dados.
  * @param {object} session - O objeto de sessão completo do usuário.
+ * @param {string} recentHistoryString - As últimas mensagens formatadas.
  * @returns {string} O systemPrompt final e pronto para ser enviado à LLM.
  */
-function buildPromptForClinic(clinicConfig, session) {
+function buildPromptForClinic(clinicConfig, session, recentHistoryString) {
     // Validação para garantir que ambos os objetos necessários foram passados.
     if (!clinicConfig || !session) {
         throw new Error("Configuração da clínica e sessão são necessárias para construir o prompt.");
@@ -141,6 +148,8 @@ function buildPromptForClinic(clinicConfig, session) {
     // Injeta os dados da sessão
     prompt = prompt.replace(/{{currentState}}/g, session.state || 'nepq_discovery');
     prompt = prompt.replace(/{{patientFirstName}}/g, session.firstName || 'paciente');
+    prompt = prompt.replace('{{conversationSummary}}', session.conversationSummary || 'A conversa está apenas a começar.');
+    prompt = prompt.replace('{{recentHistory}}', recentHistoryString);
     
     // Injeta a base de conhecimento
     const knowledgeBaseString = JSON.stringify(clinicConfig.knowledgeBase, null, 2);

@@ -1,7 +1,7 @@
 // src/handlers/nepq.handler.js
 const config = require('../config');
 const { OpenAI } = require('openai');
-const { buildPromptForClinic } = require('../services/promptBuilder');
+const aiService = require('../services/ai.service');
 // 1. IMPORTAMOS O NOVO SERVIÇO DE AGENDA
 const calendarService = require('../services/calendar.service'); 
 
@@ -33,29 +33,13 @@ function calculateEndTime(startDateTime, durationMinutes = 50) {
  */
 async function getLlmReply(session, latestMessage) {
     try {
-        const systemPrompt = buildPromptForClinic(session.clinicConfig, session);
-
-        const messages = [
-            { role: 'system', content: systemPrompt },
-            ...session.conversationHistory,
-            { role: 'user', content: latestMessage }
-        ];
-
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
-            messages,
-            temperature: 0.7,
-            max_tokens: 600,
-        });
-
-        const botReply = response.choices[0].message.content;
-
         session.conversationHistory.push({ role: 'user', content: latestMessage });
+
+        const botReply = await aiService.getAiResponse(session);
+
         session.conversationHistory.push({ role: 'assistant', content: botReply });
-        
-        if (session.conversationHistory.length > 12) {
-            session.conversationHistory = session.conversationHistory.slice(-12);
-        }
+
+        session.conversationSummary = await aiService.getUpdatedSummary(session.conversationHistory);
 
         const isClosingStatement = 
             botReply.includes("Por isso o atendimento é particular.") ||
