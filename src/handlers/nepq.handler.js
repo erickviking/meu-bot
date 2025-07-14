@@ -33,7 +33,11 @@ function calculateEndTime(startDateTime, durationMinutes = 50) {
  */
 async function getLlmReply(session, latestMessage) {
     try {
-        const systemPrompt = buildPromptForClinic(session.clinicConfig, session);
+        const recentHistoryString = (session.conversationHistory || [])
+            .map(m => `${m.role === 'user' ? 'Paciente' : 'Secretária'}: ${m.content}`)
+            .join('\n');
+
+        const systemPrompt = buildPromptForClinic(session.clinicConfig, session, recentHistoryString);
 
         const messages = [
             { role: 'system', content: systemPrompt },
