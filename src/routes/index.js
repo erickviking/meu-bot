@@ -1,17 +1,20 @@
-// File: src/routes/index.js
+// File: src/routes/index.js (Versão Final e Corrigida)
 
-// Inicializa o roteador principal do Express
 const express = require('express');
+
+// Importa os roteadores secundários
 const webhookRoutes = require('./webhook.routes');
 const conversationRoutes = require('./conversation.routes');
-const patientRoutes = require('./patients.routes'); // <-- 1. IMPORTAR A NOVA ROTA
-const clinicRoutes = require('./clinics.routes'); // 1. IMPORTAR
+const patientRoutes = require('./patients.routes');
+const clinicRoutes = require('./clinics.routes');
 
+// Inicializa o roteador principal
 const router = express.Router();
 
+// Delega as rotas para os seus respectivos handlers
 router.use('/', webhookRoutes);
 router.use('/api/v1/conversations', conversationRoutes);
-router.use('/api/v1/patients', patientRoutes); // <-- 2. USAR A NOVA ROTA
-router.use('/api/v1/clinics', clinicRoutes); // 2. USAR
+router.use('/api/v1/patients', patientRoutes);
+router.use('/api/v1/clinics', clinicRoutes);
 
 module.exports = router;
