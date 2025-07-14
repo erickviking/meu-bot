@@ -29,6 +29,7 @@ class SessionManager {
             onboardingState: 'start', // Podemos manter para o onboarding inicial
             state: 'onboarding', // O NOVO ESTADO PRINCIPAL!
             conversationHistory: [],
+            conversationSummary: '',
             messageBuffer: [],
             clinicConfig: null,
         };
@@ -52,6 +53,7 @@ class SessionManager {
             // Garante que sessões antigas tenham os novos campos
             if (!session.onboardingState) session.onboardingState = session.firstName ? 'complete' : 'start';
             if (!session.messageBuffer) session.messageBuffer = [];
+            if (!session.conversationSummary) session.conversationSummary = '';
 
             // ### INÍCIO DA LÓGICA MULTI-TENANT ###
             // Se a configuração da clínica ainda não foi carregada para esta sessão...
