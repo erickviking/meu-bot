@@ -17,21 +17,42 @@ router.patch('/:clinicId', async (req, res) => {
     }
 
     try {
-        const { data, error } = await supabase
-            .from('clinics')
-            .update({ google_calendar_id: google_calendar_id }) // Atualiza apenas o campo necessário
-            .eq('id', clinicId)
-            .select()
+        const { data: existing, error: selectError } = await supabase
+            .from('clinic_settings')
+            .select('clinic_id')
+            .eq('clinic_id', clinicId)
             .single();
 
-        if (error) {
-            // Este erro pode acontecer se o RLS negar a atualização.
-            console.error('Erro ao atualizar ID da agenda:', error);
-            throw error;
+        if (selectError && selectError.code !== 'PGRST116') {
+            console.error('Erro ao verificar settings existentes:', selectError);
+            throw selectError;
         }
-        
+
+        let result;
+
+        if (existing) {
+            const { data, error } = await supabase
+                .from('clinic_settings')
+                .update({ google_calendar_id })
+                .eq('clinic_id', clinicId)
+                .select()
+                .single();
+
+            if (error) throw error;
+            result = data;
+        } else {
+            const { data, error } = await supabase
+                .from('clinic_settings')
+                .insert({ clinic_id: clinicId, google_calendar_id })
+                .select()
+                .single();
+
+            if (error) throw error;
+            result = data;
+        }
+
         console.log(`[API] ID da Agenda para a clínica ${clinicId} atualizado com sucesso.`);
-        res.status(200).json(data);
+        res.status(200).json(result);
 
     } catch (error) {
         res.status(500).json({ error: 'Erro interno ao atualizar a clínica.', details: error.message });
