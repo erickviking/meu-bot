@@ -13,26 +13,40 @@ async function getClinicConfigByWhatsappId(whatsappPhoneId) {
     }
 
     try {
-        const { data, error } = await supabase
+        const { data: clinic, error: clinicError } = await supabase
             .from('clinics')
-            // <<< 1. CORREÇÃO AQUI: Adicionamos 'id' à lista de colunas selecionadas.
             .select('id, doctor_name, secretary_name, knowledge_base')
             .eq('whatsapp_phone_id', whatsappPhoneId)
             .single();
 
-        if (error) {
-            console.error(`🚨 Erro ao buscar clínica para o ID ${whatsappPhoneId}:`, error.message);
+        if (clinicError) {
+            console.error(`🚨 Erro ao buscar clínica para o ID ${whatsappPhoneId}:`, clinicError.message);
             return null;
         }
 
-        if (data) {
-            // Renomeia os campos e inclui o ID no objeto retornado.
+        if (clinic) {
+            let calendarId = null;
+
+            const { data: settings, error: settingsError } = await supabase
+                .from('clinic_settings')
+                .select('google_calendar_id')
+                .eq('clinic_id', clinic.id)
+                .single();
+
+            if (settingsError && settingsError.code !== 'PGRST116') {
+                console.error(`🚨 Erro ao buscar settings para a clínica ${clinic.id}:`, settingsError.message);
+            }
+
+            if (settings) {
+                calendarId = settings.google_calendar_id;
+            }
+
             return {
-                // <<< 2. CORREÇÃO AQUI: Incluímos o 'id' no objeto de retorno.
-                id: data.id, 
-                doctorName: data.doctor_name,
-                secretaryName: data.secretary_name,
-                knowledgeBase: data.knowledge_base
+                id: clinic.id,
+                doctorName: clinic.doctor_name,
+                secretaryName: clinic.secretary_name,
+                knowledgeBase: clinic.knowledge_base,
+                google_calendar_id: calendarId
             };
         }
 
