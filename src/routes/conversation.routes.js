@@ -1,5 +1,5 @@
 // Ficheiro: src/routes/conversation.routes.js
-// Descrição: Adiciona os endpoints para enviar mensagens e limpar o histórico.
+// Descrição: Rotas padronizadas para gerir conversas.
 
 const express = require('express');
 const { generateAndSaveSummary } = require('../services/summary.service');
@@ -8,23 +8,24 @@ const { sendMessage } = require('../services/whatsappService');
 
 const router = express.Router();
 
-// --- ROTA PARA ENVIAR MENSAGEM DE TEXTO (NOVA) ---
-// Esta rota é chamada pelo frontend para enviar uma mensagem manual.
-// POST /send-text (Movida para a raiz para simplicidade)
-router.post('/send-text', async (req, res) => {
-    const { to, text, clinicId } = req.body;
+// --- ROTA PARA ENVIAR MENSAGEM DE TEXTO (CORRIGIDA) ---
+// O endpoint agora é mais consistente com o resto da API.
+// POST /api/v1/conversations/:phone/messages
+router.post('/:phone/messages', async (req, res) => {
+    const { phone } = req.params;
+    const { text, clinicId } = req.body;
 
-    if (!to || !text || !clinicId) {
-        return res.status(400).json({ error: 'Os campos "to", "text" e "clinicId" são obrigatórios.' });
+    if (!text || !clinicId) {
+        return res.status(400).json({ error: 'Os campos "text" e "clinicId" são obrigatórios.' });
     }
 
     try {
         // 1. Envia a mensagem para o paciente via API da Meta
-        await sendMessage(to, text);
+        await sendMessage(phone, text);
 
         // 2. Guarda a mensagem no nosso banco de dados
         await saveMessage({
-            patient_phone: to,
+            patient_phone: phone,
             content: text,
             clinic_id: clinicId,
             sender: 'clinic', // Indica que foi enviada pelo operador
@@ -34,7 +35,7 @@ router.post('/send-text', async (req, res) => {
 
         res.status(200).json({ success: true, message: 'Mensagem enviada e guardada com sucesso.' });
     } catch (error) {
-        console.error('❌ Erro no endpoint /send-text:', error);
+        console.error('❌ Erro no endpoint de envio de mensagem:', error);
         res.status(500).json({ success: false, error: 'Erro interno do servidor ao enviar mensagem.' });
     }
 });
@@ -66,12 +67,12 @@ router.post('/:phone/summarize', async (req, res) => {
 });
 
 
-// --- ROTA PARA LIMPAR HISTÓRICO (NOVA) ---
+// --- ROTA PARA LIMPAR HISTÓRICO (EXISTENTE) ---
 // DELETE /api/v1/conversations/:phone
 router.delete('/:phone', async (req, res) => {
     try {
         const { phone } = req.params;
-        const { clinicId } = req.body; // clinicId no corpo para segurança
+        const { clinicId } = req.body;
 
         if (!clinicId) {
             return res.status(400).json({ error: 'clinicId é obrigatório.' });
