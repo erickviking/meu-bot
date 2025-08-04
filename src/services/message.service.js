@@ -47,9 +47,12 @@ async function saveMessage(messageData) {
                         is_ai_active: false,
                         last_manual_message_at: now,
                     })
-                    .eq('phone', messageData.patient_phone);
+                    .eq('phone', messageData.patient_phone)
+                    .eq('clinic_id', messageData.clinic_id);
 
-                console.log(`[MessageService] IA desativada e last_manual_message_at atualizado para ${now} para ${messageData.patient_phone}`);
+                console.log(
+                    `[MessageService] IA desativada e last_manual_message_at atualizado para ${now} para ${messageData.patient_phone}`
+                );
             } catch (err) {
                 console.error('[MessageService] ERRO ao atualizar status da IA do paciente:', err.message);
             }
@@ -59,9 +62,8 @@ async function saveMessage(messageData) {
         if (newMessage) {
             const channelName = `${BASE_CHANNEL_NAME}:${newMessage.patient_phone}`;
             console.log(`[MessageService] Anunciando mensagem no canal dinâmico: "${channelName}"`);
-            
-            const channel = supabase.channel(channelName);
 
+            const channel = supabase.channel(channelName);
             await channel.send({
                 type: 'broadcast',
                 event: 'new_message',
@@ -80,18 +82,28 @@ async function saveMessage(messageData) {
 
 /**
  * Limpa todo o histórico de um paciente (mensagens e resumos)
- * chamando a função RPC no Supabase.
+ * diretamente via Supabase, sem usar RPC.
  * @param {string} patientPhone - O telefone do paciente a ser limpo.
  * @param {string} clinicId - O ID da clínica para garantir a segurança.
  */
 async function clearConversationHistory(patientPhone, clinicId) {
     console.log(`[Service] Solicitando limpeza de histórico para ${patientPhone}`);
     try {
-        const { error } = await supabase.rpc('clear_conversation_history', {
-            p_patient_phone: patientPhone,
-            p_clinic_id: clinicId
-        });
-        if (error) throw error;
+        // 1️⃣ Apagar mensagens
+        const { error: msgError } = await supabase
+            .from('messages')
+            .delete()
+            .eq('patient_phone', patientPhone)
+            .eq('clinic_id', clinicId);
+        if (msgError) throw msgError;
+
+        // 2️⃣ Apagar resumos
+        const { error: summaryError } = await supabase
+            .from('conversation_summaries')
+            .delete()
+            .eq('phone', patientPhone)
+            .eq('clinic_id', clinicId);
+        if (summaryError) throw summaryError;
 
         console.log(`[Service] Histórico para ${patientPhone} limpo com sucesso.`);
         return true;
