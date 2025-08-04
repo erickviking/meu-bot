@@ -25,6 +25,9 @@ class SessionManager {
         });
     }
 
+    /**
+     * Cria uma nova sessão em branco
+     */
     createNewSession() {
         return {
             firstName: null,
@@ -34,7 +37,7 @@ class SessionManager {
             messageBuffer: [],
             clinicConfig: null,
 
-            // 🔹 Novos campos para controle da IA
+            // 🔹 Controle da IA
             isAiActive: true,
             lastManualMessageAt: null,
 
@@ -43,21 +46,25 @@ class SessionManager {
         };
     }
 
-    async resetSession(from) {
+    /**
+     * Reseta a sessão de um paciente
+     */
+    async resetSession(phone) {
         const newSession = this.createNewSession();
-        await this.saveSession(from, newSession);
+        await this.saveSession(phone, newSession);
     }
 
     /**
-     * Recupera a sessão do paciente
-     * - Usa Redis se disponível, caso contrário, fallback em memória
-     * - Carrega configuração da clínica se ausente
-     * - Sincroniza status da IA com o banco na primeira chamada
+     * Recupera ou cria a sessão do paciente
+     * - Usa Redis ou fallback em memória
+     * - Carrega configuração da clínica (multi-tenant)
+     * - Sincroniza status da IA com Supabase
      */
     async getSession(phone) {
         let session;
 
         try {
+            // 1️⃣ Recupera sessão do Redis ou memória
             if (this.fallbackToMemory) {
                 session = this.getSessionFromMemory(phone);
             } else {
@@ -65,12 +72,12 @@ class SessionManager {
                 session = sessionData ? JSON.parse(sessionData) : this.createNewSession();
             }
 
-            // 🔹 Garante campos obrigatórios
+            // 2️⃣ Garante campos obrigatórios
             if (!session.onboardingState) session.onboardingState = session.firstName ? 'complete' : 'start';
             if (!session.messageBuffer) session.messageBuffer = [];
             if (session.isAiActive === undefined) session.isAiActive = true;
 
-            // --- Multi-tenant: garantir que a clínica esteja carregada ---
+            // 3️⃣ Multi-tenant: carregar config da clínica, se ausente
             if (!session.clinicConfig) {
                 console.log(`[Multi-Tenant] Configuração da clínica não encontrada para ${phone}. Buscando...`);
                 const botWhatsappId = config.whatsapp.phoneId;
@@ -85,24 +92,21 @@ class SessionManager {
                 }
             }
 
-            // --- 🔹 Sincroniza status da IA com o banco na primeira carga ---
-            if (!session.lastManualMessageAt) {
-                const { data: patient } = await supabase
-                    .from('patients')
-                    .select('is_ai_active, last_manual_message_at')
-                    .eq('phone', phone)
-                    .maybeSingle();
+            // 4️⃣ Sincroniza status da IA e última mensagem manual com o Supabase
+            const { data: patient } = await supabase
+                .from('patients')
+                .select('is_ai_active, last_manual_message_at')
+                .eq('phone', phone)
+                .maybeSingle();
 
-                if (patient) {
-                    session.isAiActive = patient.is_ai_active ?? true;
-                    session.lastManualMessageAt = patient.last_manual_message_at || null;
-                    console.log(`[SessionManager] Sessão de ${phone} sincronizada com Supabase (isAiActive=${session.isAiActive})`);
-                    await this.saveSession(phone, session);
-                }
+            if (patient) {
+                session.isAiActive = patient.is_ai_active ?? true;
+                session.lastManualMessageAt = patient.last_manual_message_at || null;
+                console.log(`[SessionManager] Sessão de ${phone} sincronizada (isAiActive=${session.isAiActive})`);
+                await this.saveSession(phone, session);
             }
 
             return session;
-
         } catch (error) {
             console.error('⚠️ Redis getSession falhou:', error.message);
             this.fallbackToMemory = true;
@@ -111,7 +115,7 @@ class SessionManager {
     }
 
     /**
-     * Salva a sessão em Redis (ou em memória no fallback)
+     * Salva a sessão em Redis ou em memória (fallback)
      */
     async saveSession(phone, session) {
         try {
@@ -139,6 +143,9 @@ class SessionManager {
         return this.memoryCache.get(phone);
     }
 
+    /**
+     * Fecha conexão com Redis
+     */
     async close() {
         if (!this.fallbackToMemory && this.client.isOpen) {
             await this.client.disconnect();
@@ -148,3 +155,4 @@ class SessionManager {
 }
 
 module.exports = new SessionManager();
+
