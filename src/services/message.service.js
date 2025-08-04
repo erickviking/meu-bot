@@ -2,9 +2,14 @@
 
 const supabase = require('./supabase.client');
 
-// O nome do canal base, que será combinado com o ID do paciente.
+// Canal base para mensagens em tempo real
 const BASE_CHANNEL_NAME = 'realtime-chat';
 
+/**
+ * Salva uma mensagem no banco e envia broadcast pelo canal realtime.
+ * Se for uma mensagem manual do frontend (outbound), desativa a IA
+ * do paciente e atualiza o timestamp de última mensagem manual.
+ */
 async function saveMessage(messageData) {
     console.log('[MessageService] Função saveMessage iniciada:', messageData);
 
@@ -18,6 +23,7 @@ async function saveMessage(messageData) {
     }
 
     try {
+        // 1️⃣ Salvar a mensagem no Supabase
         const { data: newMessage, error } = await supabase
             .from('messages')
             .insert(messageData)
@@ -31,6 +37,25 @@ async function saveMessage(messageData) {
 
         console.log('✅ [MessageService] Mensagem salva com sucesso:', newMessage);
 
+        // 2️⃣ Se for mensagem manual do frontend → desativa IA e marca horário
+        if (messageData.direction === 'outbound') {
+            try {
+                const now = new Date().toISOString();
+                await supabase
+                    .from('patients')
+                    .update({
+                        is_ai_active: false,
+                        last_manual_message_at: now,
+                    })
+                    .eq('phone', messageData.patient_phone);
+
+                console.log(`[MessageService] IA desativada e last_manual_message_at atualizado para ${now} para ${messageData.patient_phone}`);
+            } catch (err) {
+                console.error('[MessageService] ERRO ao atualizar status da IA do paciente:', err.message);
+            }
+        }
+
+        // 3️⃣ Broadcast da mensagem no canal realtime do paciente
         if (newMessage) {
             const channelName = `${BASE_CHANNEL_NAME}:${newMessage.patient_phone}`;
             console.log(`[MessageService] Anunciando mensagem no canal dinâmico: "${channelName}"`);
@@ -42,16 +67,17 @@ async function saveMessage(messageData) {
                 event: 'new_message',
                 payload: newMessage,
             });
+
             console.log('📢 [MessageService] Mensagem anunciada com sucesso.');
         }
+
+        return newMessage;
 
     } catch (err) {
         console.error('❌ [MessageService] ERRO FATAL NO TRY/CATCH:', JSON.stringify(err, null, 2));
     }
 }
 
-
-// --- INÍCIO DA ADIÇÃO ---
 /**
  * Limpa todo o histórico de um paciente (mensagens e resumos)
  * chamando a função RPC no Supabase.
@@ -61,23 +87,19 @@ async function saveMessage(messageData) {
 async function clearConversationHistory(patientPhone, clinicId) {
     console.log(`[Service] Solicitando limpeza de histórico para ${patientPhone}`);
     try {
-        // CORREÇÃO: Garantimos que os nomes dos parâmetros correspondem
-        // exatamente aos definidos na sua função SQL.
         const { error } = await supabase.rpc('clear_conversation_history', {
             p_patient_phone: patientPhone,
             p_clinic_id: clinicId
         });
         if (error) throw error;
+
         console.log(`[Service] Histórico para ${patientPhone} limpo com sucesso.`);
         return true;
+
     } catch (error) {
         console.error(`❌ Erro ao limpar histórico para ${patientPhone}:`, error.message);
         return false;
     }
 }
-// --- FIM DA ADIÇÃO ---
 
-
-// --- ATUALIZAÇÃO DA EXPORTAÇÃO ---
-// Agora exportamos as duas funções.
 module.exports = { saveMessage, clearConversationHistory };
