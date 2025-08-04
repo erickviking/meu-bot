@@ -1,5 +1,4 @@
 // src/handlers/webhook.handler.js
-
 const config = require('../config');
 const sessionManager = require('../services/sessionManager');
 const whatsappService = require('../services/whatsappService');
@@ -18,7 +17,6 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API
 const debounceTimers = new Map();
 const summaryTimers = new Map();
 
-// Configurações de timers
 const SUMMARY_INACTIVITY_TIMEOUT = 60 * 60 * 1000; // 1 hora
 const AUTO_REACTIVATE_AI_MINUTES = 15; // 15 minutos
 
@@ -66,6 +64,7 @@ async function processBufferedMessages(from) {
     await saveMessage({
       content: llmResult.reply,
       direction: 'outbound',
+      sender: 'ai', // 🔹 Identifica como mensagem da IA
       patient_phone: from,
       clinic_id: session.clinicConfig.id,
     });
@@ -100,7 +99,7 @@ async function processIncomingMessage(req, res) {
     const from = messageData.from;
     let text = '';
 
-    // Log detalhado para depuração de áudio
+    // --- Tratamento de áudio ---
     if (messageData.type === 'audio' || messageData.type === 'voice') {
       console.log(`[Webhook] Áudio recebido de ${from}:`, JSON.stringify(messageData, null, 2));
       const mediaId = messageData.audio?.id || messageData.voice?.id;
@@ -181,6 +180,7 @@ async function processIncomingMessage(req, res) {
         await saveMessage({
           content: text,
           direction: 'inbound',
+          sender: 'patient',
           patient_phone: from,
           clinic_id: session.clinicConfig.id,
         });
@@ -209,6 +209,7 @@ async function processIncomingMessage(req, res) {
       await saveMessage({
         content: text,
         direction: 'inbound',
+        sender: 'patient',
         patient_phone: from,
         clinic_id: session.clinicConfig.id,
       });
@@ -233,6 +234,7 @@ async function processIncomingMessage(req, res) {
           await saveMessage({
             content: onboardingResponse,
             direction: 'outbound',
+            sender: 'ai', // 🔹 IA não pausa IA
             patient_phone: from,
             clinic_id: session.clinicConfig.id,
           });
@@ -249,6 +251,7 @@ async function processIncomingMessage(req, res) {
           await saveMessage({
             content: objectionResponse,
             direction: 'outbound',
+            sender: 'ai',
             patient_phone: from,
             clinic_id: session.clinicConfig.id,
           });
