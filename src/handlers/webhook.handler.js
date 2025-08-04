@@ -1,4 +1,5 @@
 // src/handlers/webhook.handler.js
+
 const config = require('../config');
 const sessionManager = require('../services/sessionManager');
 const whatsappService = require('../services/whatsappService');
@@ -60,11 +61,12 @@ async function processBufferedMessages(from) {
 
   const llmResult = await getLlmReply(session, fullMessage);
 
+  // 🔹 Mensagem gerada pela IA não pausa a IA
   if (session.clinicConfig?.id && llmResult.reply) {
     await saveMessage({
       content: llmResult.reply,
       direction: 'outbound',
-      sender: 'ai', // 🔹 Identifica como mensagem da IA
+      sender: 'ai',
       patient_phone: from,
       clinic_id: session.clinicConfig.id,
     });
@@ -117,9 +119,7 @@ async function processIncomingMessage(req, res) {
 
       console.log(`[Transcribe] Recebido áudio de ${from}, tamanho: ${audioBuffer.length} bytes`);
       text = await transcribeAudio(audioBuffer);
-      if (!text) {
-        console.warn(`[Webhook] Transcrição vazia para áudio de ${from}`);
-      }
+      if (!text) console.warn(`[Webhook] Transcrição vazia para áudio de ${from}`);
     }
 
     if (messageData.type === 'text') {
@@ -127,7 +127,6 @@ async function processIncomingMessage(req, res) {
     }
 
     if (!text) return res.sendStatus(200);
-
     res.sendStatus(200);
 
     // Resetar timer de resumo
@@ -204,7 +203,7 @@ async function processIncomingMessage(req, res) {
       return;
     }
 
-    // Salvar mensagem inbound
+    // Salvar mensagem inbound (do paciente)
     if (session.clinicConfig?.id) {
       await saveMessage({
         content: text,
@@ -234,7 +233,7 @@ async function processIncomingMessage(req, res) {
           await saveMessage({
             content: onboardingResponse,
             direction: 'outbound',
-            sender: 'ai', // 🔹 IA não pausa IA
+            sender: 'ai',
             patient_phone: from,
             clinic_id: session.clinicConfig.id,
           });
