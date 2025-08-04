@@ -1,4 +1,5 @@
 // src/handlers/webhook.handler.js
+
 const config = require('../config');
 const sessionManager = require('../services/sessionManager');
 const whatsappService = require('../services/whatsappService');
@@ -13,11 +14,14 @@ const { createClient } = require('@supabase/supabase-js');
 const axios = require('axios');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY);
-const debounceTimers = new Map();
-const summaryTimers = new Map(); // Mapa para guardar os timers de resumo
 
-// Tempo de inatividade para gerar resumo (1 hora em milissegundos)
-const SUMMARY_INACTIVITY_TIMEOUT = 60 * 60 * 1000; 
+const debounceTimers = new Map();
+const summaryTimers = new Map(); 
+
+// Tempo de inatividade para gerar resumo (1 hora)
+const SUMMARY_INACTIVITY_TIMEOUT = 60 * 60 * 1000;
+// Tempo para reativar IA após atendimento manual
+const AUTO_REACTIVATE_AI_MINUTES = 15;
 
 async function getProfilePicture(phoneNumberId, accessToken) {
   try {
@@ -52,10 +56,13 @@ async function processBufferedMessages(from) {
     debounceTimers.delete(from);
     return;
   }
+
   const fullMessage = bufferedMessages.join('. ');
   console.log(`[Debounce] Processando mensagem agrupada de ${from}: "${fullMessage}"`);
   session.messageBuffer = [];
+
   const llmResult = await getLlmReply(session, fullMessage);
+
   if (session.clinicConfig?.id && llmResult.reply) {
     await saveMessage({
       content: llmResult.reply,
@@ -64,14 +71,17 @@ async function processBufferedMessages(from) {
       clinic_id: session.clinicConfig.id
     });
   }
+
   if (llmResult.newState && llmResult.newState !== session.state) {
     session.state = llmResult.newState;
   }
   await sessionManager.saveSession(from, session);
+
   if (llmResult.reply) {
     await simulateTypingDelay(llmResult.reply);
     await sendMultiPartMessage(from, llmResult.reply);
   }
+
   debounceTimers.delete(from);
 }
 
@@ -99,48 +109,66 @@ async function processIncomingMessage(req, res) {
       }
     }
 
-    if (!text) {
-      return res.sendStatus(200);
-    }
+    if (!text) return res.sendStatus(200);
 
     res.sendStatus(200);
 
-    // A cada nova mensagem, cancela o timer de resumo anterior para reiniciar a contagem.
+    // Resetar timer de resumo
     if (summaryTimers.has(from)) {
-        clearTimeout(summaryTimers.get(from));
-        console.log(`[Auto-Summary] Timer de inatividade para ${from} foi resetado.`);
+      clearTimeout(summaryTimers.get(from));
+      console.log(`[Auto-Summary] Timer de inatividade para ${from} foi resetado.`);
     }
 
-    const { data: existingPatient } = await supabase.from('patients').select('name').eq('phone', from).maybeSingle();
+    // Criar/atualizar paciente
+    const { data: existingPatient } = await supabase
+      .from('patients')
+      .select('name')
+      .eq('phone', from)
+      .maybeSingle();
+
     if (!existingPatient || !existingPatient.name) {
       const profilePicUrl = await getProfilePicture(phoneNumberId, config.whatsapp.token);
-      await supabase.from('patients').upsert({ phone: from, name: nameFromContact || from, profile_picture_url: profilePicUrl }, { onConflict: ['phone'] });
+      await supabase.from('patients').upsert(
+        { phone: from, name: nameFromContact || from, profile_picture_url: profilePicUrl },
+        { onConflict: ['phone'] }
+      );
     }
 
     const session = await sessionManager.getSession(from);
 
-            // --- INÍCIO DA MODIFICAÇÃO: VERIFICAÇÃO DE PAUSA DA IA ---
-        const { data: patient } = await supabase
-            .from('patients')
-            .select('is_ai_active')
-            .eq('phone', from)
-            .single();
+    // --- VERIFICAÇÃO DE IA E AUTO-REACTIVAÇÃO ---
+    const { data: patient } = await supabase
+      .from('patients')
+      .select('is_ai_active, last_manual_message_at')
+      .eq('phone', from)
+      .single();
 
-        // Se a IA estiver inativa para este paciente, o webhook apenas salva a mensagem
-        // e encerra, sem enviar para a lógica de resposta da IA.
-        if (patient && !patient.is_ai_active) {
-            console.log(`[Webhook] IA pausada para ${from}. Apenas salvando a mensagem.`);
-            await saveMessage({
-                content: text, direction: 'inbound', patient_phone: from, clinic_id: session.clinicConfig.id
-            });
-            // Não esqueça de resetar o timer de resumo automático, se estiver usando
-            if (summaryTimers.has(from)) {
-                clearTimeout(summaryTimers.get(from));
-            }
-            return; // Encerra a execução aqui.
-        }
-        // --- FIM DA MODIFICAÇÃO ---
+    let aiActive = patient?.is_ai_active ?? true;
 
+    if (!aiActive && patient?.last_manual_message_at) {
+      const lastManual = new Date(patient.last_manual_message_at);
+      const diffMinutes = (Date.now() - lastManual.getTime()) / 1000 / 60;
+
+      if (diffMinutes >= AUTO_REACTIVATE_AI_MINUTES) {
+        console.log(`[Webhook] IA reativada automaticamente para ${from} após ${AUTO_REACTIVATE_AI_MINUTES} min.`);
+        aiActive = true;
+        await supabase.from('patients').update({ is_ai_active: true }).eq('phone', from);
+      }
+    }
+
+    // Se IA estiver inativa, só salva a mensagem e sai
+    if (!aiActive) {
+      console.log(`[Webhook] IA pausada para ${from}. Apenas salvando a mensagem.`);
+      await saveMessage({
+        content: text,
+        direction: 'inbound',
+        patient_phone: from,
+        clinic_id: session.clinicConfig.id
+      });
+      return;
+    }
+
+    // --- Comandos especiais ---
     if (text.toLowerCase() === '/novaconversa') {
       if (debounceTimers.has(from)) clearTimeout(debounceTimers.get(from));
       debounceTimers.delete(from);
@@ -150,12 +178,13 @@ async function processIncomingMessage(req, res) {
       if (session.clinicConfig?.id) {
         await clearConversationHistory(from, session.clinicConfig.id);
       }
-      
+
       await sessionManager.resetSession(from);
       await whatsappService.sendMessage(from, "Sessão e histórico reiniciados. Pode começar uma nova conversa.");
       return;
     }
 
+    // Salvar mensagem inbound
     if (session.clinicConfig?.id) {
       await saveMessage({
         content: text,
@@ -165,33 +194,43 @@ async function processIncomingMessage(req, res) {
       });
     }
 
+    // --- Emergências ---
     if (isEmergency(text)) {
       const emergencyResponse = getEmergencyResponse(session.firstName);
       await whatsappService.sendMessage(from, emergencyResponse);
       return;
     }
 
+    // --- Onboarding ---
     if (session.onboardingState !== 'complete') {
       const onboardingResponse = await handleInitialMessage(session, text, session.clinicConfig);
       if (onboardingResponse) {
         await sessionManager.saveSession(from, session);
         await simulateTypingDelay(onboardingResponse);
         await whatsappService.sendMessage(from, onboardingResponse);
+
         if (session.clinicConfig?.id) {
-            await saveMessage({
-                content: onboardingResponse, direction: 'outbound', patient_phone: from, clinic_id: session.clinicConfig.id
-            });
+          await saveMessage({
+            content: onboardingResponse,
+            direction: 'outbound',
+            patient_phone: from,
+            clinic_id: session.clinicConfig.id
+          });
         }
         return;
       }
     }
 
+    // --- Objeções ---
     if (session.state === 'closing_delivered') {
       const objectionResponse = detetarObjeção(text, session.firstName);
       if (objectionResponse) {
         if (session.clinicConfig?.id) {
           await saveMessage({
-            content: objectionResponse, direction: 'outbound', patient_phone: from, clinic_id: session.clinicConfig.id
+            content: objectionResponse,
+            direction: 'outbound',
+            patient_phone: from,
+            clinic_id: session.clinicConfig.id
           });
         }
         await simulateTypingDelay(objectionResponse);
@@ -200,26 +239,26 @@ async function processIncomingMessage(req, res) {
       }
     }
 
-    if (debounceTimers.has(from)) {
-      clearTimeout(debounceTimers.get(from));
-    }
+    // --- Debounce de mensagens ---
+    if (debounceTimers.has(from)) clearTimeout(debounceTimers.get(from));
     const userBuffer = session.messageBuffer || [];
     userBuffer.push(text);
     session.messageBuffer = userBuffer;
     await sessionManager.saveSession(from, session);
+
     const newDebounceTimer = setTimeout(() => {
       processBufferedMessages(from);
     }, 3500);
     debounceTimers.set(from, newDebounceTimer);
 
-    // No final do processamento, cria um NOVO timer de resumo.
+    // --- Timer de resumo ---
     if (session.clinicConfig?.id) {
-        const newSummaryTimer = setTimeout(() => {
-            console.log(`[Auto-Summary] Inatividade de 1h detectada para ${from}. Gerando resumo...`);
-            generateAndSaveSummary(from, session.clinicConfig.id);
-            summaryTimers.delete(from);
-        }, SUMMARY_INACTIVITY_TIMEOUT);
-        summaryTimers.set(from, newSummaryTimer);
+      const newSummaryTimer = setTimeout(() => {
+        console.log(`[Auto-Summary] Inatividade de 1h detectada para ${from}. Gerando resumo...`);
+        generateAndSaveSummary(from, session.clinicConfig.id);
+        summaryTimers.delete(from);
+      }, SUMMARY_INACTIVITY_TIMEOUT);
+      summaryTimers.set(from, newSummaryTimer);
     }
 
   } catch (error) {
