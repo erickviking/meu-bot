@@ -1,5 +1,4 @@
 // src/handlers/webhook.handler.js
-
 const config = require('../config');
 const sessionManager = require('../services/sessionManager');
 const whatsappService = require('../services/whatsappService');
@@ -171,6 +170,8 @@ async function processIncomingMessage(req, res) {
         await supabase.from('patients').update({ is_ai_active: true }).eq('phone', from);
       }
     }
+
+    console.log(`[Webhook] Estado da IA para ${from}: ${aiActive ? 'ATIVA' : 'PAUSADA'}`);
 
     // Se IA estiver inativa, só salva a mensagem e sai
     if (!aiActive) {
