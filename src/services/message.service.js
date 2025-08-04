@@ -7,8 +7,10 @@ const BASE_CHANNEL_NAME = 'realtime-chat';
 
 /**
  * Salva uma mensagem no banco e envia broadcast pelo canal realtime.
- * Se for uma mensagem manual do frontend (outbound), desativa a IA
+ * Se for uma mensagem manual do frontend (outbound manual), desativa a IA
  * do paciente e atualiza o timestamp de última mensagem manual.
+ *
+ * Use messageData.sender = 'manual' para diferenciar do envio automático da IA.
  */
 async function saveMessage(messageData) {
     console.log('[MessageService] Função saveMessage iniciada:', messageData);
@@ -37,8 +39,8 @@ async function saveMessage(messageData) {
 
         console.log('✅ [MessageService] Mensagem salva com sucesso:', newMessage);
 
-        // 2️⃣ Se for mensagem manual do frontend → desativa IA e marca horário
-        if (messageData.direction === 'outbound') {
+        // 2️⃣ Pausar IA SOMENTE para mensagens outbound manuais
+        if (messageData.direction === 'outbound' && messageData.sender === 'manual') {
             try {
                 const now = new Date().toISOString();
                 await supabase
@@ -50,9 +52,7 @@ async function saveMessage(messageData) {
                     .eq('phone', messageData.patient_phone)
                     .eq('clinic_id', messageData.clinic_id);
 
-                console.log(
-                    `[MessageService] IA desativada e last_manual_message_at atualizado para ${now} para ${messageData.patient_phone}`
-                );
+                console.log(`[MessageService] IA desativada (mensagem manual) e last_manual_message_at atualizado para ${now} para ${messageData.patient_phone}`);
             } catch (err) {
                 console.error('[MessageService] ERRO ao atualizar status da IA do paciente:', err.message);
             }
@@ -83,8 +83,6 @@ async function saveMessage(messageData) {
 /**
  * Limpa todo o histórico de um paciente (mensagens e resumos)
  * diretamente via Supabase, sem usar RPC.
- * @param {string} patientPhone - O telefone do paciente a ser limpo.
- * @param {string} clinicId - O ID da clínica para garantir a segurança.
  */
 async function clearConversationHistory(patientPhone, clinicId) {
     console.log(`[Service] Solicitando limpeza de histórico para ${patientPhone}`);
