@@ -7,14 +7,15 @@ const BASE_CHANNEL_NAME = 'realtime-chat';
 
 /**
  * Salva uma mensagem no banco e envia broadcast pelo canal realtime.
- * Se for uma mensagem manual do frontend (outbound manual), desativa a IA
- * do paciente e atualiza o timestamp de última mensagem manual.
- *
- * Use messageData.sender = 'manual' para diferenciar do envio automático da IA.
+ * 
+ * - Se for uma mensagem manual do frontend (`sender: 'manual'` e `direction: 'outbound'`),
+ *   desativa a IA do paciente e atualiza `last_manual_message_at`.
+ * - Mensagens da IA (`sender: 'ai'`) ou do paciente (`sender: 'patient'`) não pausam a IA.
  */
 async function saveMessage(messageData) {
     console.log('[MessageService] Função saveMessage iniciada:', messageData);
 
+    // 🔹 Validação de dados obrigatórios
     if (!messageData.clinic_id || !messageData.patient_phone) {
         console.error('[MessageService] ERRO: clinic_id e patient_phone são obrigatórios. Abortando.');
         return;
@@ -82,7 +83,7 @@ async function saveMessage(messageData) {
 
 /**
  * Limpa todo o histórico de um paciente (mensagens e resumos)
- * diretamente via Supabase, sem usar RPC.
+ * diretamente via Supabase, garantindo que a IA tenha um "reset" real.
  */
 async function clearConversationHistory(patientPhone, clinicId) {
     console.log(`[Service] Solicitando limpeza de histórico para ${patientPhone}`);
