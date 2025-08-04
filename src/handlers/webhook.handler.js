@@ -9,26 +9,25 @@ const { simulateTypingDelay } = require('../utils/helpers');
 const { isEmergency, getEmergencyResponse } = require('../utils/emergencyDetector');
 const { detetarObjeção } = require('./objection.handler');
 const { saveMessage, clearConversationHistory } = require('../services/message.service');
-const { generateAndSaveSummary } = require('../services/summary.service'); 
+const { generateAndSaveSummary } = require('../services/summary.service');
 const { createClient } = require('@supabase/supabase-js');
 const axios = require('axios');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY);
 
 const debounceTimers = new Map();
-const summaryTimers = new Map(); 
+const summaryTimers = new Map();
 
-// Tempo de inatividade para gerar resumo (1 hora)
-const SUMMARY_INACTIVITY_TIMEOUT = 60 * 60 * 1000;
-// Tempo para reativar IA após atendimento manual
-const AUTO_REACTIVATE_AI_MINUTES = 15;
+// Configurações de timers
+const SUMMARY_INACTIVITY_TIMEOUT = 60 * 60 * 1000; // 1 hora
+const AUTO_REACTIVATE_AI_MINUTES = 15; // 15 minutos
 
 async function getProfilePicture(phoneNumberId, accessToken) {
   try {
     const url = `https://graph.facebook.com/v19.0/${phoneNumberId}/picture`;
     const response = await axios.get(url, {
       params: { access_token: accessToken },
-      responseType: 'arraybuffer'
+      responseType: 'arraybuffer',
     });
     return response.request.res.responseUrl || null;
   } catch (error) {
@@ -39,12 +38,12 @@ async function getProfilePicture(phoneNumberId, accessToken) {
 
 async function sendMultiPartMessage(to, fullText) {
   if (!fullText) return;
-  const paragraphs = fullText.split('\n\n').filter(p => p.trim().length > 0);
+  const paragraphs = fullText.split('\n\n').filter((p) => p.trim().length > 0);
   for (const paragraph of paragraphs) {
     await whatsappService.sendMessage(to, paragraph);
     if (paragraphs.length > 1) {
       const interMessageDelay = 1500 + Math.random() * 1000;
-      await new Promise(resolve => setTimeout(resolve, interMessageDelay));
+      await new Promise((resolve) => setTimeout(resolve, interMessageDelay));
     }
   }
 }
@@ -68,7 +67,7 @@ async function processBufferedMessages(from) {
       content: llmResult.reply,
       direction: 'outbound',
       patient_phone: from,
-      clinic_id: session.clinicConfig.id
+      clinic_id: session.clinicConfig.id,
     });
   }
 
@@ -92,21 +91,40 @@ async function processIncomingMessage(req, res) {
     const nameFromContact = contact?.profile?.name;
     const phoneNumberId = req.body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
 
-    if (!messageData || (messageData.type !== 'text' && messageData.type !== 'audio')) {
+    // Aceita text, audio e voice
+    const validTypes = ['text', 'audio', 'voice'];
+    if (!messageData || !validTypes.includes(messageData.type)) {
       return res.sendStatus(200);
     }
 
     const from = messageData.from;
     let text = '';
 
+    // Log detalhado para depuração de áudio
+    if (messageData.type === 'audio' || messageData.type === 'voice') {
+      console.log(`[Webhook] Áudio recebido de ${from}:`, JSON.stringify(messageData, null, 2));
+      const mediaId = messageData.audio?.id || messageData.voice?.id;
+
+      if (!mediaId) {
+        console.warn(`[Webhook] Mensagem de áudio recebida de ${from}, mas sem mediaId.`);
+        return res.sendStatus(200);
+      }
+
+      const audioBuffer = await whatsappService.downloadMedia(mediaId);
+      if (!audioBuffer || !audioBuffer.length) {
+        console.warn(`[Webhook] Erro ao baixar áudio de ${from}. Buffer vazio.`);
+        return res.sendStatus(200);
+      }
+
+      console.log(`[Transcribe] Recebido áudio de ${from}, tamanho: ${audioBuffer.length} bytes`);
+      text = await transcribeAudio(audioBuffer);
+      if (!text) {
+        console.warn(`[Webhook] Transcrição vazia para áudio de ${from}`);
+      }
+    }
+
     if (messageData.type === 'text') {
       text = messageData.text?.body || '';
-    } else if (messageData.type === 'audio') {
-      const mediaId = messageData.audio?.id;
-      const audioBuffer = mediaId ? await whatsappService.downloadMedia(mediaId) : null;
-      if (audioBuffer) {
-        text = await transcribeAudio(audioBuffer);
-      }
     }
 
     if (!text) return res.sendStatus(200);
@@ -159,16 +177,18 @@ async function processIncomingMessage(req, res) {
     // Se IA estiver inativa, só salva a mensagem e sai
     if (!aiActive) {
       console.log(`[Webhook] IA pausada para ${from}. Apenas salvando a mensagem.`);
-      await saveMessage({
-        content: text,
-        direction: 'inbound',
-        patient_phone: from,
-        clinic_id: session.clinicConfig.id
-      });
+      if (session.clinicConfig?.id) {
+        await saveMessage({
+          content: text,
+          direction: 'inbound',
+          patient_phone: from,
+          clinic_id: session.clinicConfig.id,
+        });
+      }
       return;
     }
 
-    // --- Comandos especiais ---
+    // --- Comando especial ---
     if (text.toLowerCase() === '/novaconversa') {
       if (debounceTimers.has(from)) clearTimeout(debounceTimers.get(from));
       debounceTimers.delete(from);
@@ -180,7 +200,7 @@ async function processIncomingMessage(req, res) {
       }
 
       await sessionManager.resetSession(from);
-      await whatsappService.sendMessage(from, "Sessão e histórico reiniciados. Pode começar uma nova conversa.");
+      await whatsappService.sendMessage(from, 'Sessão e histórico reiniciados. Pode começar uma nova conversa.');
       return;
     }
 
@@ -190,7 +210,7 @@ async function processIncomingMessage(req, res) {
         content: text,
         direction: 'inbound',
         patient_phone: from,
-        clinic_id: session.clinicConfig.id
+        clinic_id: session.clinicConfig.id,
       });
     }
 
@@ -214,7 +234,7 @@ async function processIncomingMessage(req, res) {
             content: onboardingResponse,
             direction: 'outbound',
             patient_phone: from,
-            clinic_id: session.clinicConfig.id
+            clinic_id: session.clinicConfig.id,
           });
         }
         return;
@@ -230,7 +250,7 @@ async function processIncomingMessage(req, res) {
             content: objectionResponse,
             direction: 'outbound',
             patient_phone: from,
-            clinic_id: session.clinicConfig.id
+            clinic_id: session.clinicConfig.id,
           });
         }
         await simulateTypingDelay(objectionResponse);
@@ -260,7 +280,6 @@ async function processIncomingMessage(req, res) {
       }, SUMMARY_INACTIVITY_TIMEOUT);
       summaryTimers.set(from, newSummaryTimer);
     }
-
   } catch (error) {
     console.error('❌ Erro fatal no webhook handler:', error);
   }
