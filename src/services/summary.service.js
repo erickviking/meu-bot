@@ -67,7 +67,7 @@ ${conversationText}
 
     // ETAPA 4: Chamada à OpenAI
     const response = await openai.chat.completions.create({
-      model: 'gpt-5',
+      model: 'gpt-4o',
       messages: [{ role: 'system', content: summaryPrompt }],
       temperature: 0.2,
       max_tokens: 250,
