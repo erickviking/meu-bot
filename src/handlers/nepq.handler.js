@@ -42,7 +42,7 @@ async function getLlmReply(session, latestMessage) {
         ];
 
         const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: 'gpt-5-chat-latest',
             messages,
             temperature: 0.7,
             max_tokens: 600,
@@ -137,7 +137,7 @@ async function handleInitialMessage(session, message, clinicConfig) {
         `;
 
         const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: 'gpt-5-chat-latest',
             messages: [{ role: 'system', content: nameExtractionPrompt }],
             response_format: { type: "json_object" } 
         });
