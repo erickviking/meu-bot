@@ -118,7 +118,7 @@ async function handleInitialMessage(session, message, clinicConfig) {
 
     if (currentState === 'start') {
         session.onboardingState = 'awaiting_name';
-        return `Olá! Bem-vindo(a) ao consultório do Dr. ${doctorName}. Sou a secretária virtual, ${secretaryName}. Com quem eu tenho o prazer de falar? 😊`;
+        return `Olá! Bem-vindo(a) ao consultório do Dr. ${doctorName}. Sou a secretária virtual, ${secretaryName}. Qual é o seu nome, por favor?`;
     }
 
     if (currentState === 'awaiting_name') {
@@ -158,7 +158,7 @@ async function handleInitialMessage(session, message, clinicConfig) {
             session.onboardingState = 'complete';
             session.state = 'nepq_discovery';
 
-            const welcomeMessage = `Perfeito, ${formattedName}! É um prazer falar com você. 😊 Para eu te ajudar da melhor forma, pode me contar o que te motivou a procurar o Dr. ${doctorName} hoje?`;
+            const welcomeMessage = `Perfeito, ${formattedName}! É um prazer falar com você. Para eu te ajudar da melhor forma, pode me contar o que te motivou a procurar o Dr. ${doctorName} hoje?`;
             session.conversationHistory = [
                 { role: 'user', content: `O paciente se apresentou como ${formattedName}.` },
                 { role: 'assistant', content: welcomeMessage }
