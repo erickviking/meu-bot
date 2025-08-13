@@ -14,6 +14,14 @@ function t(lang, pt, en) {
   return (lang === 'en') ? en : pt;
 }
 
+function formatDoctorName(raw, lang = 'pt') {
+  const r = (raw || '').trim();
+  // remove prefixos "dr " ou "dr. " (pt/en, case-insensitive)
+  const noPrefix = r.replace(/^\s*dr\.?\s+/i, '');
+  // prefixa uma única vez
+  return `Dr. ${noPrefix}`;
+}
+
 // Detecta se a resposta da IA contém o "fechamento" (PT/EN)
 function detectClosing(reply) {
   const text = (reply || '').toLowerCase();
