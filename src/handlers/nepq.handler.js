@@ -79,7 +79,7 @@ Consider clinic's local timezone if hinted; otherwise keep ISO without timezone.
   try {
     const resp = await openai.chat.completions.create({
       model: 'gpt-5-mini',
-      temperature: 0,
+      // ⚠️ sem temperature (este modelo no seu SDK não aceita)
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: sys },
@@ -88,7 +88,19 @@ Consider clinic's local timezone if hinted; otherwise keep ISO without timezone.
     });
 
     const raw = resp.choices?.[0]?.message?.content || '{}';
-    const parsed = JSON.parse(raw);
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // fallback heurístico simples se vier texto
+      const mIso = raw.match(/"start_iso"\s*:\s*"([^"]*)"/i);
+      const mDur = raw.match(/"duration_min"\s*:\s*([0-9]+)/i);
+      parsed = {
+        start_iso: mIso ? mIso[1] : null,
+        duration_min: mDur ? Number(mDur[1]) : 50
+      };
+    }
+
     return {
       start_iso: parsed.start_iso ?? null,
       duration_min: (parsed.duration_min != null ? Number(parsed.duration_min) : 50) || 50,
@@ -153,7 +165,6 @@ async function getLlmReply(session, latestMessage) {
     }
 
     // 2) Agendamento confirmado → criar evento no Google Calendar
-    // Detecção simples (bilíngue)
     const lower = botReply.toLowerCase();
     const bookingDetected =
       lower.includes('consulta confirmada') ||
@@ -217,15 +228,21 @@ async function getLlmReply(session, latestMessage) {
 async function handleInitialMessage(session, message, clinicConfig) {
   const lang = session.lang || 'pt';
   const currentState = session.onboardingState;
-  const doctorName = clinicConfig.doctorName || t(lang, 'nosso especialista', 'our specialist');
-  const secretaryName = clinicConfig.secretaryName || t(lang, 'a assistente virtual', 'the virtual assistant');
+
+  // Sanitiza o nome do médico para evitar "Dr. Dr. ..."
+  const doctorNameFmt = formatDoctorName(
+    clinicConfig.doctorName || (lang === 'en' ? 'our specialist' : 'nosso especialista'),
+    lang
+  );
+  const secretaryName =
+    clinicConfig.secretaryName || (lang === 'en' ? 'the virtual assistant' : 'a assistente virtual');
 
   if (currentState === 'start') {
     session.onboardingState = 'awaiting_name';
     return t(
       lang,
-      `Olá! Bem-vindo(a) ao consultório do Dr. ${doctorName}. Eu sou ${secretaryName}. Qual é o seu nome, por favor?`,
-      `Hello! Welcome to Dr. ${doctorName}'s office. I am ${secretaryName}. What is your name, please?`
+      `Olá! Bem-vindo(a) ao consultório do ${doctorNameFmt}. Eu sou ${secretaryName}. Qual é o seu nome, por favor?`,
+      `Hello! Welcome to ${doctorNameFmt}'s office. I am ${secretaryName}. What is your name, please?`
     );
   }
 
@@ -247,7 +264,7 @@ If no clear name, use null.`
     try {
       const resp = await openai.chat.completions.create({
         model: 'gpt-5-mini',
-        temperature: 0,
+        // ⚠️ sem temperature (este modelo no seu SDK não aceita)
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: sys },
@@ -256,7 +273,15 @@ If no clear name, use null.`
       });
 
       const json = resp.choices?.[0]?.message?.content || '{}';
-      const result = JSON.parse(json);
+      let result;
+      try {
+        result = JSON.parse(json);
+      } catch {
+        // fallback heurístico simples
+        const m = json.match(/"extracted_name"\s*:\s*"([^"]+)"/i);
+        result = { extracted_name: m ? m[1] : null };
+      }
+
       const potentialName = (result.extracted_name || '').trim();
 
       if (!potentialName || potentialName.length < 2) {
@@ -276,8 +301,8 @@ If no clear name, use null.`
 
       const welcome = t(
         lang,
-        `Perfeito, ${formatted}! É um prazer falar com você. Para te ajudar melhor, pode me contar o que te trouxe ao Dr. ${doctorName} hoje?`,
-        `Perfect, ${formatted}! It's a pleasure to speak with you. To best assist you, could you tell me what brought you to see Dr. ${doctorName} today?`
+        `Perfeito, ${formatted}! É um prazer falar com você. Para te ajudar melhor, pode me contar o que te trouxe ao ${doctorNameFmt} hoje?`,
+        `Perfect, ${formatted}! It's a pleasure to speak with you. To best assist you, could you tell me what brought you to see ${doctorNameFmt} today?`
       );
 
       session.conversationHistory = [
@@ -300,4 +325,3 @@ If no clear name, use null.`
 }
 
 module.exports = { getLlmReply, handleInitialMessage };
-
