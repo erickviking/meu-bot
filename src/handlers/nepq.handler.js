@@ -1,4 +1,4 @@
-// src/handlers/nepq.handler.js (English Version)
+// src/handlers/nepq.handler.js
 
 const config = require('../config');
 const { OpenAI } = require('openai');
@@ -7,163 +7,289 @@ const calendarService = require('../services/calendar.service');
 
 const openai = new OpenAI({ apiKey: config.openai.apiKey });
 
-// --- HELPER FUNCTIONS FOR DATE/TIME ---
-function convertToISO(dateString) {
-    console.warn(`[Helper] Date/time conversion needs to be implemented. Using current date as fallback.`);
-    return new Date().toISOString();
+// =========================
+// Helpers de idioma / texto
+// =========================
+function t(lang, pt, en) {
+  return (lang === 'en') ? en : pt;
 }
 
-function calculateEndTime(startDateTime, durationMinutes = 50) {
-    const startDate = new Date(startDateTime);
-    const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
-    return endDate.toISOString();
+// Detecta se a resposta da IA contém o "fechamento" (PT/EN)
+function detectClosing(reply) {
+  const text = (reply || '').toLowerCase();
+
+  // Português
+  const ptRules = [
+    /por isso o atendimento é particular/,
+    /o investimento (para|da) (primeira|1ª) consulta/i,
+    /valor da consulta/i,
+    /podemos seguir com o agendamento\?/i,
+  ];
+
+  // Inglês
+  const enRules = [
+    /that's why the service is private/i,
+    /the investment for the first consultation is/i,
+    /consultation (fee|price|cost)/i,
+    /shall we proceed with the booking\?/i,
+  ];
+
+  return ptRules.some(r => r.test(text)) || enRules.some(r => r.test(text));
 }
 
-/**
- * Main function that communicates with the LLM and now also with Google Calendar.
- * @param {object} session - The complete user session object.
- * @param {string} latestMessage - The latest message sent by the user.
- * @returns {Promise<object>} An object containing the AI's reply and the new conversation state.
- */
-async function getLlmReply(session, latestMessage) {
-    try {
-        const systemPrompt = buildPromptForClinic(session.clinicConfig, session);
+// =========================
+// Extração de data/hora p/ calendário (via LLM - JSON)
+// =========================
+async function extractAppointmentInfo(session, userText) {
+  // Retorna { start_iso: string|null, duration_min: number|null }
+  const lang = session.lang || 'pt';
 
-        const messages = [
-            { role: 'system', content: systemPrompt },
-            ...session.conversationHistory,
-            { role: 'user', content: latestMessage }
-        ];
+  const sys = t(
+    lang,
+    // PT
+    `Você é um extrator de informações de agendamento. 
+Retorne apenas JSON com os campos:
+- "start_iso": data/hora ISO 8601 (ex: "2025-08-13T15:00:00-03:00") quando possível; caso não haja, use null.
+- "duration_min": duração em minutos (número). Se não houver, use 50.
+Se a mensagem não contiver data/hora clara, "start_iso" deve ser null.
+Considere o fuso horário local da clínica se houver pistas; caso contrário, mantenha em ISO sem timezone.`,
+    // EN
+    `You are a scheduling info extractor.
+Return JSON only with:
+- "start_iso": ISO 8601 datetime (e.g., "2025-08-13T15:00:00-03:00") when possible; if missing, use null.
+- "duration_min": duration in minutes (number). If missing, use 50.
+If the message lacks a clear date/time, "start_iso" must be null.
+Consider clinic's local timezone if hinted; otherwise keep ISO without timezone.`
+  );
 
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o', // Recommended model
-            messages,
-            temperature: 0.7,
-            max_tokens: 600,
-        });
+  const user = t(
+    lang,
+    `Mensagem do paciente: """${userText || ''}"""`,
+    `Patient message: """${userText || ''}"""`
+  );
 
-        const botReply = response.choices[0].message.content;
+  try {
+    const resp = await openai.chat.completions.create({
+      model: 'gpt-5-mini',
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: user },
+      ],
+    });
 
-        session.conversationHistory.push({ role: 'user', content: latestMessage });
-        session.conversationHistory.push({ role: 'assistant', content: botReply });
-        
-        if (session.conversationHistory.length > 12) {
-            session.conversationHistory = session.conversationHistory.slice(-12);
-        }
-
-        // Check for closing statement in English
-        const isClosingStatement = 
-            botReply.includes("That's why the service is private") ||
-            botReply.includes("The investment for the first consultation is");
-
-        if (isClosingStatement && session.state === 'nepq_discovery') {
-            console.log(`[FSM] Closing statement detected. Changing state to 'closing_delivered'.`);
-            return { reply: botReply, newState: 'closing_delivered' };
-        }
-        
-        // --- GOOGLE CALENDAR INTEGRATION ---
-        // Check for booking confirmation in English
-        const isBookingConfirmed = botReply.toLowerCase().includes("appointment confirmed") || botReply.toLowerCase().includes("successfully scheduled");
-
-        if (isBookingConfirmed) {
-            console.log(`[FSM] Booking confirmed by AI. Creating event in Google Calendar...`);
-            const clinicCalendarId = session.clinicConfig?.google_calendar_id;
-
-            if (clinicCalendarId) {
-                const appointmentString = "July 15, 2025, 10:00"; // Example
-                const startDateTime = convertToISO(appointmentString);
-                const endDateTime = calculateEndTime(startDateTime);
-
-                await calendarService.createEvent(clinicCalendarId, {
-                    summary: `Consultation - ${session.firstName}`,
-                    description: `Booking via virtual assistant for ${session.firstName}.\nPhone: ${session.from}`,
-                    startDateTime,
-                    endDateTime,
-                });
-            } else {
-                console.warn(`⚠️ Clinic ${session.clinicConfig.doctorName} does not have a Google Calendar configured.`);
-            }
-
-            return { reply: botReply, newState: 'booked' };
-        }
-        // --- END OF GOOGLE CALENDAR INTEGRATION ---
-
-        return { reply: botReply, newState: session.state };
-
-    } catch (error) {
-        console.error('🚨 Error in OpenAI API call:', error);
-        return { 
-            reply: `Sorry, ${session.firstName || 'friend'}, I am experiencing a technical difficulty.`,
-            newState: session.state 
-        };
-    }
+    const raw = resp.choices?.[0]?.message?.content || '{}';
+    const parsed = JSON.parse(raw);
+    return {
+      start_iso: parsed.start_iso ?? null,
+      duration_min: (parsed.duration_min != null ? Number(parsed.duration_min) : 50) || 50,
+    };
+  } catch (e) {
+    console.warn('[extractAppointmentInfo] fallback:', e?.message);
+    return { start_iso: null, duration_min: 50 };
+  }
 }
 
-
-/**
- * ADVANCED FINAL VERSION: Manages onboarding using AI to extract the name.
- */
-async function handleInitialMessage(session, message, clinicConfig) {
-    const currentState = session.onboardingState;
-    const doctorName = clinicConfig.doctorName || 'our specialist';
-    const secretaryName = clinicConfig.secretaryName || 'the virtual assistant';
-
-    if (currentState === 'start') {
-        session.onboardingState = 'awaiting_name';
-        return `Hello! Welcome to Dr. ${doctorName}'s office. I am ${secretaryName}, the virtual assistant. What is your name, please?`;
-    }
-
-    if (currentState === 'awaiting_name') {
-        console.log(`[AI Onboarding] Attempting to extract name from sentence: "${message}"`);
-        
-        const nameExtractionPrompt = `
-        Your task is to analyze a user's sentence introducing themselves to a secretary named 'Ana' and extract the user's first name.
-        Follow this reasoning process:
-        1. Analyze the sentence: "${message}".
-        2. Identify all people's names in the sentence.
-        3. Determine which name belongs to the USER who is speaking, ignoring the secretary's name ('Ana').
-        4. If a user's name is found, put it in the 'extracted_name' field.
-        5. If no user name is found, or if it's just a greeting, the value of 'extracted_name' must be null.
-        Respond ONLY with a valid JSON object, following this format:
-        { "reasoning": "Your step-by-step reasoning here.", "extracted_name": "UserFirstName" }
-        `;
-
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o', // Recommended model
-            messages: [{ role: 'system', content: nameExtractionPrompt }],
-            response_format: { type: "json_object" } 
-        });
-
-        const responseContent = response.choices[0].message.content;
-        console.log('[AI Onboarding] JSON response from AI:', responseContent);
-
-        try {
-            const result = JSON.parse(responseContent);
-            const potentialName = result.extracted_name;
-
-            if (!potentialName || potentialName.length < 2) {
-                return `Sorry, I could not identify your name. Could you please tell me just what I should call you?`;
-            }
-
-            const formattedName = potentialName.split(" ")[0].charAt(0).toUpperCase() + potentialName.split(" ")[0].slice(1).toLowerCase();
-            session.firstName = formattedName;
-            session.onboardingState = 'complete';
-            session.state = 'nepq_discovery';
-
-            const welcomeMessage = `Perfect, ${formattedName}! It's a pleasure to speak with you. To best assist you, could you tell me what brought you to see Dr. ${doctorName} today?`;
-            session.conversationHistory = [
-                { role: 'user', content: `The patient introduced themselves as ${formattedName}.` },
-                { role: 'assistant', content: welcomeMessage }
-            ];
-            
-            return welcomeMessage;
-        } catch (e) {
-            console.error("Error processing JSON from AI:", e);
-            return `Sorry, I'm having a technical difficulty understanding your response. Could you please repeat your name?`;
-        }
-    }
-
+function calculateEndTime(startISO, durationMinutes = 50) {
+  try {
+    const start = new Date(startISO);
+    if (Number.isNaN(start.getTime())) return null;
+    const end = new Date(start.getTime() + (durationMinutes * 60000));
+    return end.toISOString();
+  } catch {
     return null;
+  }
+}
+
+// =========================
+// LLM principal (resposta ao usuário) + calendário
+// =========================
+async function getLlmReply(session, latestMessage) {
+  const lang = session.lang || 'pt';
+  try {
+    const baseSystem = buildPromptForClinic(session.clinicConfig, session);
+
+    const languagePolicy = t(
+      lang,
+      'POLÍTICA DE IDIOMA: Responda em português do Brasil, claro e natural. Se o usuário mudar de idioma, espelhe o idioma dele.',
+      'LANGUAGE POLICY: Answer in natural, clear English. If the user switches language, mirror their language.'
+    );
+
+    const messages = [
+      { role: 'system', content: `${baseSystem}\n\n${languagePolicy}` },
+      ...(session.conversationHistory || []),
+      { role: 'user', content: latestMessage }
+    ];
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-5-chat-latest',
+      messages,
+      temperature: 0.6,
+      max_tokens: 700,
+    });
+
+    const botReply = response.choices?.[0]?.message?.content ?? '';
+
+    // Atualiza histórico curto (janela)
+    session.conversationHistory = [
+      ...(session.conversationHistory || []),
+      { role: 'user', content: latestMessage },
+      { role: 'assistant', content: botReply },
+    ].slice(-12);
+
+    // 1) Fechamento detectado → troca de estado
+    if (detectClosing(botReply) && session.state === 'nepq_discovery') {
+      console.log(`[FSM] Closing detected → 'closing_delivered'`);
+      return { reply: botReply, newState: 'closing_delivered' };
+    }
+
+    // 2) Agendamento confirmado → criar evento no Google Calendar
+    // Detecção simples (bilíngue)
+    const lower = botReply.toLowerCase();
+    const bookingDetected =
+      lower.includes('consulta confirmada') ||
+      lower.includes('agendamento confirmado') ||
+      lower.includes('agendada com sucesso') ||
+      lower.includes('appointment confirmed') ||
+      lower.includes('successfully scheduled');
+
+    if (bookingDetected) {
+      console.log(`[FSM] Booking confirmed by AI → creating Google Calendar event`);
+      const clinicCalendarId = session?.clinicConfig?.google_calendar_id;
+
+      if (clinicCalendarId) {
+        // Tenta extrair data/hora a partir das mensagens recentes (usuário e/ou resposta)
+        const refText = [latestMessage, botReply].filter(Boolean).join('\n---\n');
+        const { start_iso, duration_min } = await extractAppointmentInfo(session, refText);
+
+        if (start_iso) {
+          const endISO = calculateEndTime(start_iso, duration_min || 50);
+          try {
+            await calendarService.createEvent(clinicCalendarId, {
+              summary: t(lang, `Consulta - ${session.firstName || ''}`, `Consultation - ${session.firstName || ''}`),
+              description: t(
+                lang,
+                `Agendamento via assistente virtual para ${session.firstName || ''}.\nTelefone: ${session.from || ''}`,
+                `Booking via virtual assistant for ${session.firstName || ''}.\nPhone: ${session.from || ''}`
+              ),
+              startDateTime: start_iso,
+              endDateTime: endISO || start_iso,
+            });
+          } catch (e) {
+            console.warn('[Calendar] createEvent failed:', e?.message);
+          }
+        } else {
+          console.warn('[Calendar] No start_iso extracted; skipping event creation.');
+        }
+      } else {
+        console.warn(`[Calendar] Clinic without google_calendar_id.`);
+      }
+
+      return { reply: botReply, newState: 'booked' };
+    }
+
+    return { reply: botReply, newState: session.state };
+  } catch (error) {
+    console.error('🚨 Error in OpenAI API call:', error);
+    return {
+      reply: t(
+        lang,
+        `Desculpe, ${session.firstName || 'amigo(a)'}, estou com uma indisponibilidade técnica agora.`,
+        `Sorry, ${session.firstName || 'friend'}, I am experiencing a technical issue right now.`
+      ),
+      newState: session.state,
+    };
+  }
+}
+
+// =========================
+// Onboarding (extração de nome) – bilíngue
+// =========================
+async function handleInitialMessage(session, message, clinicConfig) {
+  const lang = session.lang || 'pt';
+  const currentState = session.onboardingState;
+  const doctorName = clinicConfig.doctorName || t(lang, 'nosso especialista', 'our specialist');
+  const secretaryName = clinicConfig.secretaryName || t(lang, 'a assistente virtual', 'the virtual assistant');
+
+  if (currentState === 'start') {
+    session.onboardingState = 'awaiting_name';
+    return t(
+      lang,
+      `Olá! Bem-vindo(a) ao consultório do Dr. ${doctorName}. Eu sou ${secretaryName}. Qual é o seu nome, por favor?`,
+      `Hello! Welcome to Dr. ${doctorName}'s office. I am ${secretaryName}. What is your name, please?`
+    );
+  }
+
+  if (currentState === 'awaiting_name') {
+    console.log(`[AI Onboarding] Extracting first name from: "${message}"`);
+
+    const sys = t(
+      lang,
+      `Extraia o primeiro nome do usuário a partir da frase. 
+Responda APENAS com JSON válido no formato:
+{ "extracted_name": "Nome" }
+Se não houver nome claro, use null.`,
+      `Extract the user's first name from the sentence.
+Reply ONLY with valid JSON:
+{ "extracted_name": "Name" }
+If no clear name, use null.`
+    );
+
+    try {
+      const resp = await openai.chat.completions.create({
+        model: 'gpt-5-mini',
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content: message || '' },
+        ],
+      });
+
+      const json = resp.choices?.[0]?.message?.content || '{}';
+      const result = JSON.parse(json);
+      const potentialName = (result.extracted_name || '').trim();
+
+      if (!potentialName || potentialName.length < 2) {
+        return t(
+          lang,
+          `Desculpe, não consegui identificar seu nome. Pode me dizer somente como devo te chamar?`,
+          `Sorry, I couldn't identify your name. Could you please tell me just what I should call you?`
+        );
+      }
+
+      const first = potentialName.split(/\s+/)[0];
+      const formatted = first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+
+      session.firstName = formatted;
+      session.onboardingState = 'complete';
+      session.state = 'nepq_discovery';
+
+      const welcome = t(
+        lang,
+        `Perfeito, ${formatted}! É um prazer falar com você. Para te ajudar melhor, pode me contar o que te trouxe ao Dr. ${doctorName} hoje?`,
+        `Perfect, ${formatted}! It's a pleasure to speak with you. To best assist you, could you tell me what brought you to see Dr. ${doctorName} today?`
+      );
+
+      session.conversationHistory = [
+        { role: 'user', content: t(lang, `O paciente se apresentou como ${formatted}.`, `The patient introduced themselves as ${formatted}.`) },
+        { role: 'assistant', content: welcome }
+      ];
+
+      return welcome;
+    } catch (e) {
+      console.error('[Onboarding] name extraction failed:', e);
+      return t(
+        lang,
+        `Desculpe, estou com dificuldade técnica para entender sua resposta. Pode repetir seu nome?`,
+        `Sorry, I'm having a technical difficulty understanding your response. Could you please repeat your name?`
+      );
+    }
+  }
+
+  return null;
 }
 
 module.exports = { getLlmReply, handleInitialMessage };
+
