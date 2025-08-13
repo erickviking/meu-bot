@@ -12,6 +12,9 @@ const { generateAndSaveSummary } = require('../services/summary.service');
 const { createClient } = require('@supabase/supabase-js');
 const axios = require('axios');
 
+// 🔤 NOVO: detecção de idioma por LLM (PT/EN) — PT é padrão
+const { detectLangLLM } = require('../utils/langLLM');
+
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY);
 
 const debounceTimers = new Map();
@@ -27,7 +30,7 @@ async function getProfilePicture(phoneNumberId, accessToken) {
       params: { access_token: accessToken },
       responseType: 'arraybuffer',
     });
-    return response.request.res.responseUrl || null;
+    return response.request?.res?.responseUrl || null;
   } catch (error) {
     console.error('[WhatsApp] Erro ao buscar foto de perfil:', error.message);
     return null;
@@ -58,6 +61,7 @@ async function processBufferedMessages(from) {
   console.log(`[Debounce] Processando mensagem agrupada de ${from}: "${fullMessage}"`);
   session.messageBuffer = [];
 
+  // IA deve responder no idioma atual da sessão
   const llmResult = await getLlmReply(session, fullMessage);
 
   // 🔹 Mensagem gerada pela IA não pausa a IA
@@ -100,7 +104,7 @@ async function processIncomingMessage(req, res) {
     const from = messageData.from;
     let text = '';
 
-    // --- Tratamento de áudio ---
+    // --- Tratamento de áudio (transcrição) ---
     if (messageData.type === 'audio' || messageData.type === 'voice') {
       console.log(`[Webhook] Áudio recebido de ${from}:`, JSON.stringify(messageData, null, 2));
       const mediaId = messageData.audio?.id || messageData.voice?.id;
@@ -126,7 +130,36 @@ async function processIncomingMessage(req, res) {
     }
 
     if (!text) return res.sendStatus(200);
+
+    // ✅ Retorne 200 o quanto antes para não estourar timeout do WhatsApp
     res.sendStatus(200);
+
+    // Obtenha/prepare a sessão ANTES do upsert do paciente (precisamos do clinicId)
+    const session = await sessionManager.getSession(from);
+
+    // 🔤 Idioma principal = PT-BR; detecta com LLM e salva na sessão
+    // - primeira mensagem: define
+    // - depois, troca se o usuário sustentar 2 msgs em outro idioma
+    try {
+      const detected = await detectLangLLM(text); // 'pt' | 'en'
+      if (!session.lang) {
+        session.lang = detected || 'pt';
+      } else {
+        if (detected && detected !== session.lang) {
+          session._langSwitchCount = (session._langSwitchCount || 0) + 1;
+          if (session._langSwitchCount >= 2) {
+            session.lang = detected;
+            session._langSwitchCount = 0;
+          }
+        } else {
+          session._langSwitchCount = 0;
+        }
+      }
+    } catch (e) {
+      console.warn('[Webhook] detectLangLLM falhou, mantendo lang atual ou PT:', e?.message);
+      if (!session.lang) session.lang = 'pt';
+    }
+    await sessionManager.saveSession(from, session);
 
     // Resetar timer de resumo
     if (summaryTimers.has(from)) {
@@ -134,29 +167,38 @@ async function processIncomingMessage(req, res) {
       console.log(`[Auto-Summary] Timer de inatividade para ${from} foi resetado.`);
     }
 
-    // Criar/atualizar paciente
+    // === Criar/atualizar PACIENTE (sempre com clinic_id) ===
+    // Ordem corrigida: precisamos do clinicId da sessão.
+    const clinicId = session?.clinicConfig?.id || null;
+
+    // Busca paciente existente (preferencialmente por (phone, clinic_id) se já tiver migrado o schema)
     const { data: existingPatient } = await supabase
       .from('patients')
-      .select('name')
+      .select('name, clinic_id')
       .eq('phone', from)
       .maybeSingle();
 
-    if (!existingPatient || !existingPatient.name) {
+    if (!existingPatient || !existingPatient.name || !existingPatient.clinic_id) {
       const profilePicUrl = await getProfilePicture(phoneNumberId, config.whatsapp.token);
+      // ⚠️ Se sua tabela ainda tem UNIQUE/PK apenas em 'phone', deixe onConflict: ['phone'].
+      // Quando migrar para (phone, clinic_id), troque para ['phone','clinic_id'].
       await supabase.from('patients').upsert(
-        { phone: from, name: nameFromContact || from, profile_picture_url: profilePicUrl },
-        { onConflict: ['phone'] }
+        {
+          phone: from,
+          clinic_id: clinicId, // <- MULTI-TENANT
+          name: nameFromContact || from,
+          profile_picture_url: profilePicUrl,
+        },
+        { onConflict: ['phone'] } // mude para ['phone','clinic_id'] após migração
       );
     }
-
-    const session = await sessionManager.getSession(from);
 
     // --- VERIFICAÇÃO DE IA E AUTO-REACTIVAÇÃO ---
     const { data: patient } = await supabase
       .from('patients')
       .select('is_ai_active, last_manual_message_at')
       .eq('phone', from)
-      .single();
+      .maybeSingle();
 
     let aiActive = patient?.is_ai_active ?? true;
 
@@ -171,18 +213,18 @@ async function processIncomingMessage(req, res) {
       }
     }
 
-    console.log(`[Webhook] Estado da IA para ${from}: ${aiActive ? 'ATIVA' : 'PAUSADA'}`);
+    console.log(`[Webhook] Estado da IA para ${from}: ${aiActive ? 'ATIVA' : 'PAUSADA'} | lang=${session.lang || 'pt'}`);
 
     // Se IA estiver inativa, só salva a mensagem e sai
     if (!aiActive) {
       console.log(`[Webhook] IA pausada para ${from}. Apenas salvando a mensagem.`);
-      if (session.clinicConfig?.id) {
+      if (clinicId) {
         await saveMessage({
           content: text,
           direction: 'inbound',
           sender: 'patient',
           patient_phone: from,
-          clinic_id: session.clinicConfig.id,
+          clinic_id: clinicId,
         });
       }
       return;
@@ -195,8 +237,8 @@ async function processIncomingMessage(req, res) {
       if (summaryTimers.has(from)) clearTimeout(summaryTimers.get(from));
       summaryTimers.delete(from);
 
-      if (session.clinicConfig?.id) {
-        await clearConversationHistory(from, session.clinicConfig.id);
+      if (clinicId) {
+        await clearConversationHistory(from, clinicId);
       }
 
       await sessionManager.resetSession(from);
@@ -205,13 +247,13 @@ async function processIncomingMessage(req, res) {
     }
 
     // Salvar mensagem inbound (do paciente)
-    if (session.clinicConfig?.id) {
+    if (clinicId) {
       await saveMessage({
         content: text,
         direction: 'inbound',
         sender: 'patient',
         patient_phone: from,
-        clinic_id: session.clinicConfig.id,
+        clinic_id: clinicId,
       });
     }
 
@@ -230,13 +272,13 @@ async function processIncomingMessage(req, res) {
         await simulateTypingDelay(onboardingResponse);
         await whatsappService.sendMessage(from, onboardingResponse);
 
-        if (session.clinicConfig?.id) {
+        if (clinicId) {
           await saveMessage({
             content: onboardingResponse,
             direction: 'outbound',
             sender: 'ai',
             patient_phone: from,
-            clinic_id: session.clinicConfig.id,
+            clinic_id: clinicId,
           });
         }
         return;
@@ -245,15 +287,16 @@ async function processIncomingMessage(req, res) {
 
     // --- Objeções ---
     if (session.state === 'closing_delivered') {
-      const objectionResponse = detetarObjeção(text, session.firstName);
+      // compat: se detetarObjeção for síncrona, Promise.resolve trata igual
+      const objectionResponse = await Promise.resolve(detetarObjeção(text, session.firstName, session.lang));
       if (objectionResponse) {
-        if (session.clinicConfig?.id) {
+        if (clinicId) {
           await saveMessage({
             content: objectionResponse,
             direction: 'outbound',
             sender: 'ai',
             patient_phone: from,
-            clinic_id: session.clinicConfig.id,
+            clinic_id: clinicId,
           });
         }
         await simulateTypingDelay(objectionResponse);
@@ -275,16 +318,17 @@ async function processIncomingMessage(req, res) {
     debounceTimers.set(from, newDebounceTimer);
 
     // --- Timer de resumo ---
-    if (session.clinicConfig?.id) {
+    if (clinicId) {
       const newSummaryTimer = setTimeout(() => {
         console.log(`[Auto-Summary] Inatividade de 1h detectada para ${from}. Gerando resumo...`);
-        generateAndSaveSummary(from, session.clinicConfig.id);
+        generateAndSaveSummary(from, clinicId);
         summaryTimers.delete(from);
       }, SUMMARY_INACTIVITY_TIMEOUT);
       summaryTimers.set(from, newSummaryTimer);
     }
   } catch (error) {
     console.error('❌ Erro fatal no webhook handler:', error);
+    // Não retorne erro para o WhatsApp aqui (já enviamos 200 acima), apenas logue.
   }
 }
 
