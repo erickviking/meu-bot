@@ -1,30 +1,38 @@
-import { supabase } from '../supabaseClient.js';
+const supabase = require('../services/supabase.client');
 
 /**
+ * Atualiza o status de consentimento do WhatsApp para uma clínica.
  * @param {import('express').Request} req
  * @param {import('express').Response} res
  */
-export const grantWhatsappConsent = async (req, res) => {
-  // Assumimos que o middleware de autenticação adiciona o ID do usuário ao objeto req
-  const userId = req.user.id; 
+const grantWhatsappConsent = async (req, res) => {
+  // O middleware de autenticação (authMiddleware) garante que 'req.user.id' existe.
+  const clinicId = req.user.id;
 
-  if (!userId) {
-    return res.status(401).json({ error: 'User not authenticated' });
+  if (!clinicId) {
+    // Esta verificação é uma segurança extra, mas o middleware já deve ter barrado.
+    return res.status(401).json({ error: 'Usuário não autenticado.' });
   }
 
   try {
     const { error } = await supabase
-      .from('clinics') // <-- AQUI! Alterado de 'users' para 'clinics'
+      .from('clinics') // Alvo na tabela correta
       .update({ whatsapp_consent_given: true })
-      .eq('id', userId);
+      .eq('id', clinicId);
 
     if (error) {
+      console.error('❌ Erro do Supabase ao conceder consentimento:', error);
       throw error;
     }
 
-    res.status(200).json({ message: 'WhatsApp consent granted successfully.' });
+    console.log(`[API] Consentimento para WhatsApp concedido com sucesso para a clínica ID: ${clinicId}`);
+    res.status(200).json({ message: 'Consentimento para WhatsApp concedido com sucesso.' });
+
   } catch (error) {
-    console.error('Error granting WhatsApp consent:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Erro interno do servidor ao conceder consentimento.' });
   }
+};
+
+module.exports = {
+    grantWhatsappConsent,
 };
