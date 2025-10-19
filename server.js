@@ -32,3 +32,13 @@ process.on('SIGTERM', () => {
         process.exit(0);
     });
 });
+
+process.on('SIGINT', () => {
+    console.log('📴 Recebido SIGINT, iniciando shutdown graceful...');
+    server.close(async () => {
+        const sessionManager = require('./src/services/sessionManager');
+        await sessionManager.close();
+        console.log('Processo finalizado.');
+        process.exit(0);
+    });
+});
