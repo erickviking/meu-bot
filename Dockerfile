@@ -1,5 +1,5 @@
 # Estágio 1: Builder - Instala dependências e prepara o código
-FROM node:20-slim AS builder
+FROM node:24-slim AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ COPY . .
 
 
 # Estágio 2: Production - A imagem final, otimizada e segura
-FROM node:20-slim
+FROM node:24-slim
 
 WORKDIR /app
 

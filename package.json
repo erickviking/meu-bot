@@ -10,7 +10,7 @@
   "author": "Seu Nome",
   "license": "ISC",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=24.0.0"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.44.2",
